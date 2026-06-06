@@ -1,5 +1,8 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use directories::ProjectDirs;
@@ -72,4 +75,83 @@ pub fn find_logo_path() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// TTL-based cache for the set of installed package names from a given
+/// provider. `pacman -Q` and `flatpak list` are both surprisingly slow
+/// (the latter is ~1-2s even on a warm daemon), and the installed set
+/// changes at most once per second in practice. Caching cuts a second
+/// or two off every keystroke-driven search.
+#[derive(Default)]
+pub struct InstalledCache {
+    inner: Mutex<Option<CacheEntry>>,
+    ttl: Duration,
+}
+
+struct CacheEntry {
+    fetched_at: Instant,
+    names: HashSet<String>,
+}
+
+impl InstalledCache {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            inner: Mutex::new(None),
+            ttl,
+        }
+    }
+
+    /// Returns a fresh installed-set if the cache is stale (or empty);
+    /// otherwise returns a clone of the cached set.
+    pub fn get_or_refresh<F>(&self, loader: F) -> HashSet<String>
+    where
+        F: FnOnce() -> Result<HashSet<String>>,
+    {
+        if let Some(entry) = self.inner.lock().unwrap().as_ref() {
+            if entry.fetched_at.elapsed() < self.ttl {
+                return entry.names.clone();
+            }
+        }
+        let names = match loader() {
+            Ok(set) => set,
+            Err(_) => HashSet::new(),
+        };
+        *self.inner.lock().unwrap() = Some(CacheEntry {
+            fetched_at: Instant::now(),
+            names: names.clone(),
+        });
+        names
+    }
+
+    pub fn invalidate(&self) {
+        *self.inner.lock().unwrap() = None;
+    }
+}
+
+/// True if the given binary exists on PATH and is executable.
+pub fn command_exists(name: &str) -> bool {
+    if name.is_empty() || name.contains('/') {
+        return false;
+    }
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path_var).any(|dir| {
+        let candidate = dir.join(name);
+        let Ok(meta) = std::fs::metadata(&candidate) else {
+            return false;
+        };
+        if !meta.is_file() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            meta.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    })
 }

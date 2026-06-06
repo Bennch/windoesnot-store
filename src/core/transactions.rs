@@ -58,10 +58,7 @@ pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Op
         },
         PackageSource::Flatpak => match action.kind {
             ActionKind::Install => {
-                let mut args = vec!["install".to_string()];
-                if settings.allow_noconfirm {
-                    args.push("-y".to_string());
-                }
+                let mut args = vec!["install".to_string(), "-y".to_string()];
                 if let Some(origin) = &action.origin {
                     if !origin.is_empty() {
                         args.push(origin.clone());
@@ -71,18 +68,11 @@ pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Op
                 Some(CommandSpec::new("flatpak", args))
             }
             ActionKind::Remove => {
-                let mut args = vec!["uninstall".to_string()];
-                if settings.allow_noconfirm {
-                    args.push("-y".to_string());
-                }
-                args.push(action.name.clone());
+                let args = vec!["uninstall".to_string(), "-y".to_string(), action.name.clone()];
                 Some(CommandSpec::new("flatpak", args))
             }
             ActionKind::Upgrade => {
-                let mut args = vec!["update".to_string()];
-                if settings.allow_noconfirm {
-                    args.push("-y".to_string());
-                }
+                let mut args = vec!["update".to_string(), "-y".to_string()];
                 if action.name != "flatpak" && action.name != "all" && !action.name.is_empty() {
                     args.push(action.name.clone());
                 }

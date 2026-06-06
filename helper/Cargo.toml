@@ -1,9 +1,0 @@
-[package]
-name = "aurora-helper"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-anyhow = "1.0"
-thiserror = "1.0"
-libc = "0.2"

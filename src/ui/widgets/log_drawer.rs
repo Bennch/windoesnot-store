@@ -20,6 +20,8 @@ pub struct LogDrawer {
     text_view: gtk::TextView,
     lines: Rc<RefCell<Vec<String>>>,
     min_height: Rc<RefCell<i32>>,
+    cancel_btn: gtk::Button,
+    on_cancel: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
 }
 
 impl LogDrawer {
@@ -37,6 +39,10 @@ impl LogDrawer {
 
         let minimize_btn = gtk::Button::from_icon_name("pan-down-symbolic");
         let close_btn = gtk::Button::from_icon_name("window-close-symbolic");
+        let cancel_btn = gtk::Button::with_label("Cancel");
+        cancel_btn.add_css_class("destructive-action");
+        cancel_btn.set_sensitive(false);
+        cancel_btn.set_tooltip_text(Some("Cancel the running transaction"));
         let copy_btn = gtk::Button::with_label("Copy");
         let save_btn = gtk::Button::with_label("Save");
         let clear_btn = gtk::Button::with_label("Clear");
@@ -46,10 +52,20 @@ impl LogDrawer {
         header.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         header.append(&minimize_btn);
         header.append(&close_btn);
+        header.append(&cancel_btn);
         header.append(&copy_btn);
         header.append(&save_btn);
         header.append(&clear_btn);
         header.append(&clear_lock_btn);
+
+        let on_cancel: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+        let on_cancel_click = on_cancel.clone();
+        cancel_btn.connect_clicked(move |_| {
+            let handler = on_cancel_click.borrow().clone();
+            if let Some(handler) = handler {
+                handler();
+            }
+        });
 
         let text_view = gtk::TextView::new();
         text_view.set_editable(false);
@@ -258,7 +274,18 @@ impl LogDrawer {
             text_view,
             lines,
             min_height,
+            cancel_btn,
+            on_cancel,
         }
+    }
+
+    /// Install a handler that will be invoked when the user clicks the
+    /// Cancel button in the log drawer header. The button is enabled
+    /// automatically when a handler is set and disabled when cleared.
+    pub fn set_cancel_handler<F: Fn() + 'static>(&self, handler: Option<F>) {
+        let next: Option<Rc<dyn Fn()>> = handler.map(|f| Rc::new(f) as Rc<dyn Fn()>);
+        *self.on_cancel.borrow_mut() = next;
+        self.cancel_btn.set_sensitive(self.on_cancel.borrow().is_some());
     }
 
     pub fn widget(&self) -> &gtk::Box {

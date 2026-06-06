@@ -15,16 +15,16 @@ use libadwaita as adw;
 use adw::prelude::*;
 
 use crate::core::appstream::AppStreamClient;
-use crate::core::cache::{ensure_cache_dirs, load_settings};
+use crate::core::cache::{ensure_cache_dirs, load_settings, InstalledCache};
 use crate::core::models::{
-    ActionKind, PackageSource, Settings, TerminalMode, ThemeMode, TransactionAction,
-    TransactionQueue,
+    ActionKind, PackageSource, PackageSummary, Settings, TerminalMode, ThemeMode,
+    TransactionAction, TransactionQueue,
 };
 use crate::core::providers::aur::Aur;
 use crate::core::providers::flatpak::Flatpak;
 use crate::core::providers::pacman::Pacman;
 use crate::core::providers::{AurProvider, FlatpakProvider, PacmanProvider};
-use crate::core::runner::{CommandRunner, LogEvent};
+use crate::core::runner::{CommandRunner, LogEvent, RunningHandle};
 use crate::core::transactions::{plan_transactions, TransactionPlan};
 
 pub mod details;
@@ -45,6 +45,9 @@ pub struct AppContext {
     pub queue: Arc<Mutex<TransactionQueue>>,
     pub runner: Arc<CommandRunner>,
     pub transaction_in_progress: Arc<Mutex<bool>>,
+    pub pacman_installed: Arc<InstalledCache>,
+    pub flatpak_installed: Arc<InstalledCache>,
+    pub flatpak_available: Arc<Mutex<bool>>,
 }
 
 #[derive(Clone)]
@@ -258,6 +261,9 @@ pub fn build_ui(app: &adw::Application) {
         queue: Arc::new(Mutex::new(TransactionQueue::default())),
         runner: Arc::new(CommandRunner::default()),
         transaction_in_progress: Arc::new(Mutex::new(false)),
+        pacman_installed: Arc::new(InstalledCache::new(std::time::Duration::from_secs(30))),
+        flatpak_installed: Arc::new(InstalledCache::new(std::time::Duration::from_secs(30))),
+        flatpak_available: Arc::new(Mutex::new(crate::core::cache::command_exists("flatpak"))),
     };
 
     let window = adw::ApplicationWindow::builder()
@@ -496,35 +502,145 @@ pub fn build_ui(app: &adw::Application) {
 }
 
 fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, handles: UiHandles) {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<Vec<PackageSummary>>();
     let ctx_thread = ctx.clone();
     std::thread::spawn(move || {
-        let mut pacman_results = ctx_thread.pacman.search(&query).unwrap_or_default();
-        let mut aur = ctx_thread.aur.search(&query).unwrap_or_default();
-        let mut flatpak = ctx_thread.flatpak.search(&query).unwrap_or_default();
+        // Snap whether flatpak is installed once per call so providers
+        // and the installed-set lookup agree.
+        let flatpak_enabled = *ctx_thread
+            .flatpak_available
+            .lock()
+            .unwrap();
 
-        let pacman_installed: HashSet<String> = ctx_thread
-            .pacman
-            .list_installed()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|pkg| pkg.name)
-            .collect();
-        let flatpak_installed: HashSet<String> = ctx_thread
-            .flatpak
-            .list_installed()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|pkg| pkg.name)
-            .collect();
+        // Pull the providers and caches we need into locals so the
+        // `move` closures below can capture them without dragging
+        // the whole AppContext along.
+        let pacman_provider = ctx_thread.pacman.clone();
+        let aur_provider = ctx_thread.aur.clone();
+        let flatpak_provider = ctx_thread.flatpak.clone();
+        let pacman_installed_cache = ctx_thread.pacman_installed.clone();
+        let flatpak_installed_cache = ctx_thread.flatpak_installed.clone();
+
+        // Internal channel: sub-threads → collector loop (same thread).
+        let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<SearchChunk>();
+
+        std::thread::scope(|s| {
+            // Pacman search
+            let tx_p = chunk_tx.clone();
+            let pacman_provider_c = pacman_provider.clone();
+            let query_c = query.clone();
+            s.spawn(move || {
+                let result = pacman_provider_c.search(&query_c).unwrap_or_default();
+                let _ = tx_p.send(SearchChunk::Pacman(result));
+            });
+
+            // AUR search
+            let tx_a = chunk_tx.clone();
+            let aur_provider_c = aur_provider.clone();
+            let query_c = query.clone();
+            s.spawn(move || {
+                let result = aur_provider_c.search(&query_c).unwrap_or_default();
+                let _ = tx_a.send(SearchChunk::Aur(result));
+            });
+
+            // Flatpak search (skipped if flatpak isn't installed)
+            if flatpak_enabled {
+                let tx_f = chunk_tx.clone();
+                let flatpak_provider_c = flatpak_provider.clone();
+                let query_c = query.clone();
+                s.spawn(move || {
+                    let result = flatpak_provider_c.search(&query_c).unwrap_or_default();
+                    let _ = tx_f.send(SearchChunk::Flatpak(result));
+                });
+            }
+
+            // Installed-set refreshes (cached, but pre-warm so the
+            // first search shows correct installed badges).
+            let pacman_provider_c = pacman_provider.clone();
+            s.spawn(move || {
+                let _ = pacman_installed_cache.get_or_refresh(|| {
+                    Ok(pacman_provider_c
+                        .list_installed()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|p| p.name)
+                        .collect())
+                });
+            });
+            if flatpak_enabled {
+                let flatpak_provider_c = flatpak_provider.clone();
+                s.spawn(move || {
+                    let _ = flatpak_installed_cache.get_or_refresh(|| {
+                        Ok(flatpak_provider_c
+                            .list_installed()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|p| p.name)
+                            .collect())
+                    });
+                });
+            }
+        });
+        drop(chunk_tx);
+
+        // 2) Collect chunks until all expected providers have reported
+        //    in (or the channel closes for some other reason).
+        let expected = if flatpak_enabled { 3 } else { 2 };
+        let mut pacman_results = Vec::new();
+        let mut aur_results = Vec::new();
+        let mut flatpak_results = Vec::new();
+        let mut received = 0usize;
+        while received < expected {
+            match chunk_rx.recv() {
+                Ok(SearchChunk::Pacman(v)) => {
+                    pacman_results = v;
+                    received += 1;
+                }
+                Ok(SearchChunk::Aur(v)) => {
+                    aur_results = v;
+                    received += 1;
+                }
+                Ok(SearchChunk::Flatpak(v)) => {
+                    flatpak_results = v;
+                    received += 1;
+                }
+                Err(_) => break,
+            }
+        }
+
+        // 3) Apply installed-badges from the (now warm) cache.
+        let pacman_installed = ctx_thread
+            .pacman_installed
+            .get_or_refresh(|| {
+                Ok(ctx_thread
+                    .pacman
+                    .list_installed()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect())
+            });
+        let flatpak_installed = if flatpak_enabled {
+            ctx_thread.flatpak_installed.get_or_refresh(|| {
+                Ok(ctx_thread
+                    .flatpak
+                    .list_installed()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect())
+            })
+        } else {
+            HashSet::new()
+        };
 
         for pkg in &mut pacman_results {
             pkg.installed = pacman_installed.contains(&pkg.name);
         }
-        for pkg in &mut aur {
+        for pkg in &mut aur_results {
             pkg.installed = pacman_installed.contains(&pkg.name);
         }
-        for pkg in &mut flatpak {
+        for pkg in &mut flatpak_results {
             pkg.installed = flatpak_installed.contains(&pkg.name);
         }
 
@@ -532,8 +648,8 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
             HashMap::new();
         for pkg in pacman_results
             .into_iter()
-            .chain(aur.into_iter())
-            .chain(flatpak.into_iter())
+            .chain(aur_results.into_iter())
+            .chain(flatpak_results.into_iter())
         {
             let key = (pkg.source, pkg.name.clone());
             dedup.insert(key, pkg);
@@ -541,10 +657,10 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
 
         let mut results: Vec<_> = dedup.into_values().collect();
         results.sort_by(|a, b| a.name.cmp(&b.name));
-        let _ = tx.send(results);
+        let _ = done_tx.send(results);
     });
 
-    glib::idle_add_local(move || match rx.try_recv() {
+    glib::idle_add_local(move || match done_rx.try_recv() {
         Ok(results) => {
             search_page.set_results(results, &ctx, &handles);
             ControlFlow::Break
@@ -553,6 +669,14 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
         Err(std::sync::mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
     });
 }
+
+enum SearchChunk {
+    Pacman(Vec<PackageSummary>),
+    Aur(Vec<PackageSummary>),
+    Flatpak(Vec<PackageSummary>),
+}
+
+
 
 fn run_plan(
     plan: TransactionPlan,
@@ -629,6 +753,23 @@ fn run_plan(
     let lock_hint_shown = Rc::new(RefCell::new(false));
     let in_progress = ctx_clone.transaction_in_progress.clone();
 
+    // Slot that always points at the handle of the currently-running
+    // command. The log-drawer Cancel button calls this, which terminates
+    // the child / process group. The cell is cleared once the transaction
+    // finishes (success or failure) so the button can't kill something
+    // that no longer exists.
+    let current_handle: Rc<RefCell<Option<RunningHandle>>> = Rc::new(RefCell::new(None));
+    {
+        let log_drawer_for_cancel = log_drawer.clone();
+        let current_handle_for_cancel = current_handle.clone();
+        log_drawer.set_cancel_handler(Some(move || {
+            if let Some(handle) = current_handle_for_cancel.borrow().as_ref() {
+                handle.cancel();
+            }
+            log_drawer_for_cancel.set_cancel_handler(None::<fn()>);
+        }));
+    }
+
     let next: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let next_clone = next.clone();
 
@@ -636,6 +777,7 @@ fn run_plan(
         let mut cmds = commands.borrow_mut();
         if cmds.is_empty() {
             *in_progress.lock().unwrap() = false;
+            log_drawer.set_cancel_handler(None::<fn()>);
             let dialog = adw::MessageDialog::new(
                 Some(&parent),
                 Some("Transactions complete"),
@@ -674,12 +816,18 @@ fn run_plan(
             TerminalMode::Integrated => runner.run_streaming(cmd, tx, Some(input_rx)),
         };
 
-        if let Err(err) = start_result {
-            *in_progress.lock().unwrap() = false;
-            toasts.add_toast(adw::Toast::new("Failed to start command"));
-            log_drawer.append_line(&format!("Failed to start command: {err}"), log_limit);
-            return;
-        }
+        let handle = match start_result {
+            Ok(h) => h,
+            Err(err) => {
+                *in_progress.lock().unwrap() = false;
+                log_drawer.set_cancel_handler(None::<fn()>);
+                toasts.add_toast(adw::Toast::new("Failed to start command"));
+                log_drawer.append_line(&format!("Failed to start command: {err}"), log_limit);
+                return;
+            }
+        };
+        *current_handle.borrow_mut() = Some(handle);
+
         let next_inner = next_clone.clone();
         let log_drawer = log_drawer.clone();
         let toasts = toasts.clone();
@@ -687,8 +835,9 @@ fn run_plan(
         let prompt_open = prompt_open.clone();
         let lock_hint_shown = lock_hint_shown.clone();
         let in_progress = in_progress.clone();
+        let current_handle = current_handle.clone();
         let allow_prompt_dialog = terminal_mode == TerminalMode::Integrated;
-        glib::idle_add_local(move || match rx.try_recv() {
+    glib::idle_add_local(move || match rx.try_recv() {
             Ok(event) => {
                 match event {
                     LogEvent::Line(line) => {
@@ -710,7 +859,7 @@ fn run_plan(
                             {
                                 *lock_hint_shown.borrow_mut() = true;
                                 log_drawer.append_line(
-                                    "Hint: pacman lock detected. If no package manager is running, remove it with: sudo rm -f /var/lib/pacman/db.lck",
+                                    "Hint: pacman lock detected. If no active package manager is running, remove it with: sudo rm -f /var/lib/pacman/db.lck",
                                     log_limit,
                                 );
                                 toasts.add_toast(adw::Toast::new("Pacman lock file detected"));
@@ -718,8 +867,10 @@ fn run_plan(
                         }
                     }
                     LogEvent::Finished(code) => {
+                        *current_handle.borrow_mut() = None;
                         if code != 0 {
                             *in_progress.lock().unwrap() = false;
+                            log_drawer.set_cancel_handler(None::<fn()>);
                             toasts.add_toast(adw::Toast::new(&format!(
                                 "Command failed ({code})"
                             )));
@@ -727,6 +878,7 @@ fn run_plan(
                             next();
                         } else {
                             *in_progress.lock().unwrap() = false;
+                            log_drawer.set_cancel_handler(None::<fn()>);
                         }
                         return ControlFlow::Break;
                     }
@@ -736,6 +888,7 @@ fn run_plan(
             Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 *in_progress.lock().unwrap() = false;
+                log_drawer.set_cancel_handler(None::<fn()>);
                 ControlFlow::Break
             }
         });
@@ -780,52 +933,94 @@ fn show_prompt_dialog(
     input_tx: mpsc::Sender<String>,
     prompt_open: Rc<RefCell<bool>>,
 ) {
+    // Clean the prompt text: strip trailing ": y", ": n", ": " etc.
+    let clean_prompt = prompt
+        .trim_end_matches(|c: char| c == ':' || c == ' ')
+        .to_string();
+
     let dialog = adw::MessageDialog::new(
         Some(parent),
         Some("Input Required"),
-        Some(prompt),
+        Some(&clean_prompt),
     );
-    let entry = gtk::Entry::new();
-    entry.set_placeholder_text(Some("Enter response (e.g., y, n, 1)"));
-    dialog.set_extra_child(Some(&entry));
-    dialog.add_response("y", "Yes");
-    dialog.add_response("n", "No");
-    dialog.add_response("a", "All");
-    dialog.add_response("i", "Installed");
-    dialog.add_response("no", "NotInstalled");
-    dialog.add_response("ab", "Abort");
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("send", "Send");
-    dialog.set_response_appearance("send", adw::ResponseAppearance::Suggested);
-    dialog.set_response_appearance("y", adw::ResponseAppearance::Suggested);
+
+    let lower = clean_prompt.to_lowercase();
+    let is_yn = lower.contains("[y/n]") || lower.contains("[y/n]");
+
+    if is_yn {
+        let _ = input_tx.send("y".to_string());
+        *prompt_open.borrow_mut() = false;
+        return;
+    } else {
+        // Generic prompt with all options
+        let entry = gtk::Entry::new();
+        entry.set_placeholder_text(Some("Enter response (e.g., y, n, 1)"));
+        dialog.set_extra_child(Some(&entry));
+
+        dialog.add_response("n", "No");
+        dialog.add_response("ab", "Abort");
+        dialog.add_response("a", "All");
+        dialog.add_response("i", "Installed");
+        dialog.add_response("no", "NotInstalled");
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("y", "Yes");
+        dialog.set_response_appearance("y", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("y"));
+        dialog.set_close_response("cancel");
+
+        let prompt_open_send = prompt_open.clone();
+        let input_tx_send = input_tx.clone();
+        dialog.connect_response(Some("send"), move |d, _| {
+            let text = entry.text().to_string();
+            let _ = input_tx_send.send(text);
+            *prompt_open_send.borrow_mut() = false;
+            d.close();
+        });
+        dialog.connect_response(Some("cancel"), move |d, _| {
+            d.close();
+        });
+    }
+
     let input_tx_quick = input_tx.clone();
     let prompt_open_quick = prompt_open.clone();
-    dialog.connect_response(None, move |d, resp| {
-        let val = match resp {
-            "y" => Some("y"),
-            "n" => Some("n"),
-            "a" => Some("a"),
-            "i" => Some("i"),
-            "no" => Some("no"),
-            "ab" => Some("ab"),
-            _ => None,
-        };
-        if let Some(v) = val {
-            let _ = input_tx_quick.send(v.to_string());
-            *prompt_open_quick.borrow_mut() = false;
-            d.close();
-        }
-    });
-    let prompt_open_send = prompt_open.clone();
-    dialog.connect_response(Some("send"), move |d, _| {
-        let text = entry.text().to_string();
-        let _ = input_tx.send(text);
-        *prompt_open_send.borrow_mut() = false;
+    dialog.connect_response(Some("y"), move |d, _| {
+        let _ = input_tx_quick.send("y".to_string());
+        *prompt_open_quick.borrow_mut() = false;
         d.close();
     });
-    let prompt_open_cancel = prompt_open.clone();
-    dialog.connect_response(Some("cancel"), move |d, _| {
-        *prompt_open_cancel.borrow_mut() = false;
+    let input_tx_quick2 = input_tx.clone();
+    let prompt_open_quick2 = prompt_open.clone();
+    dialog.connect_response(Some("n"), move |d, _| {
+        let _ = input_tx_quick2.send("n".to_string());
+        *prompt_open_quick2.borrow_mut() = false;
+        d.close();
+    });
+    let prompt_open_a = prompt_open.clone();
+    let input_tx_a = input_tx.clone();
+    dialog.connect_response(Some("a"), move |d, _| {
+        let _ = input_tx_a.send("a".to_string());
+        *prompt_open_a.borrow_mut() = false;
+        d.close();
+    });
+    let prompt_open_i = prompt_open.clone();
+    let input_tx_i = input_tx.clone();
+    dialog.connect_response(Some("i"), move |d, _| {
+        let _ = input_tx_i.send("i".to_string());
+        *prompt_open_i.borrow_mut() = false;
+        d.close();
+    });
+    let prompt_open_no = prompt_open.clone();
+    let input_tx_no = input_tx.clone();
+    dialog.connect_response(Some("no"), move |d, _| {
+        let _ = input_tx_no.send("no".to_string());
+        *prompt_open_no.borrow_mut() = false;
+        d.close();
+    });
+    let prompt_open_ab = prompt_open.clone();
+    let input_tx_ab = input_tx.clone();
+    dialog.connect_response(Some("ab"), move |d, _| {
+        let _ = input_tx_ab.send("ab".to_string());
+        *prompt_open_ab.borrow_mut() = false;
         d.close();
     });
     dialog.present();

@@ -137,6 +137,102 @@ Aurora aims to sit **between**:
 
 ---
 
+## 🔐 Security Model
+
+Aurora is designed with **least privilege** in mind:
+
+* The GUI runs **unprivileged**
+* All system-level operations are executed via:
+  * a **dedicated helper binary** (`/usr/bin/aurora-helper`)
+  * invoked through **polkit (pkexec)**
+* Only **whitelisted pacman actions** are allowed
+* No shell execution, no arbitrary commands
+
+This makes Aurora **safer than traditional GUI wrappers** that run entire sessions as root.
+
+### 🛡️ What the helper whitelists
+
+The helper (`src/bin/aurora-helper.rs`) only forwards a fixed set of
+pacman operations to the real binary. By default, these are:
+
+| pacman op | Meaning                                                |
+|-----------|--------------------------------------------------------|
+| `-S`      | Sync (install) a package                               |
+| `-Syu`    | Full system upgrade (no extra packages allowed)       |
+| `-R`      | Remove a single package (keep deps and config files)   |
+| `-Rns`    | Remove a package **and** its unused deps and configs   |
+| `-U`      | Install a local `.pkg.tar.*` file (path-restricted)    |
+| `-D`      | Modify the install reason (`asdeps` / `asexplicit`)    |
+
+Any other operation (e.g. `-Q`, `-Ss`, `-Si`, `-F`, `-Rdd`, …) is
+**rejected by the helper with** `operation not allowed: <op>`.
+This is **intentional** — `-Rdd` in particular can break your system
+because it skips dependency checks, and `-Q`/`-Ss` only read state
+and do not need root at all, so the helper does not need to allow them.
+
+If you call the helper directly, e.g. from an AUR helper that
+shells out through `pkexec`, and you get a rejection, that is the
+helper doing its job.
+
+### 🧩 Why isn't `-R` (or `-Rns`) allowed by default?
+
+It **is** allowed. The whitelist above is enforced by the helper
+itself, not by polkit. Polkit only governs whether `aurora-helper`
+may run as root at all (see `resources/io.github.ahmoodio.aurora.policy`).
+The helper is the layer that decides **which pacman arguments** are
+permitted.
+
+If you see `aurora-helper error: operation not allowed: -R`, it means
+you are running an older build that predates this whitelist entry.
+Rebuild and reinstall:
+
+```bash
+git pull
+makepkg -si
+```
+
+### ✏️ Customising the whitelist
+
+If you want to allow additional pacman operations (for example
+`-Rs` to remove a package and its dependencies but keep config files),
+edit the `allowed_ops` array in `src/bin/aurora-helper.rs`:
+
+```rust
+let allowed_ops = ["-S", "-Syu", "-R", "-Rs", "-Rns", "-U", "-D"];
+```
+
+You should also extend the "no packages supplied" guard below it
+to cover the new op, and rebuild:
+
+```bash
+cargo build --release
+sudo install -Dm755 target/release/aurora-helper /usr/bin/aurora-helper
+```
+
+> ⚠️ **Be careful.** The whitelist is the only thing standing
+> between an unprivileged GUI session and root. Adding `-Rdd`,
+> `-Syuu --overwrite '*'`, or anything that bypasses pacman's
+> safety checks will let the GUI (or anything that can talk to
+> the helper) damage your install. Prefer doing destructive
+> operations in a real root shell instead of relaxing the helper.
+
+### 🧪 Calling the helper manually
+
+For debugging or scripting, you can invoke it the same way the
+GUI does:
+
+```bash
+pkexec /usr/bin/aurora-helper pacman -S --noconfirm ripgrep
+pkexec /usr/bin/aurora-helper pacman -Rns --noconfirm ripgrep
+pkexec /usr/bin/aurora-helper pacman pacman -Rns --noconfirm ripgrep
+```
+
+> The `pacman` argument may appear once or twice; the helper
+> tolerates both. Other operations will be refused with
+> `operation not allowed: <op>`.
+
+---
+
 ## 📥 Installation
 
 ### From AUR (recommended)
@@ -186,22 +282,6 @@ Example:
 git tag v0.1.1
 git push origin v0.1.1
 ```
-
----
-
-## 🔐 Security Model
-
-Aurora is designed with **least privilege** in mind:
-
-* The GUI runs **unprivileged**
-* All system-level operations are executed via:
-
-  * a **dedicated helper binary**
-  * invoked through **polkit (pkexec)**
-* Only **whitelisted pacman actions** are allowed
-* No shell execution, no arbitrary commands
-
-This makes Aurora **safer than traditional GUI wrappers** that run entire sessions as root.
 
 ---
 

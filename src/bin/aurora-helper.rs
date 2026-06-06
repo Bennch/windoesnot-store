@@ -95,13 +95,50 @@ fn ensure_no_package_manager_running() -> Result<()> {
     }
 }
 
-fn validate_pacman(args: &[String]) -> Result<()> {
-    if args.is_empty() {
+fn validate_pacman(raw_args: &[String]) -> Result<()> {
+    if raw_args.is_empty() {
         return Err(anyhow!("missing pacman args"));
     }
 
-    let op = &args[0];
-    let allowed_ops = ["-S", "-Syu", "-Rns", "-U", "-D"];
+    // Normalize the operation:
+    // 1. Map long-form ops (--remove → -R, --sync → -S, etc.)
+    // 2. Split compound flags like -Rns into -R + separate -n -s flags
+    let (op, args): (String, Vec<String>) = {
+        let first = &raw_args[0];
+        match first.as_str() {
+            "--remove" => {
+                let mut a: Vec<String> = vec!["-R".into()];
+                a.extend_from_slice(&raw_args[1..]);
+                ("-R".into(), a)
+            }
+            "--sync" => {
+                let mut a: Vec<String> = vec!["-S".into()];
+                a.extend_from_slice(&raw_args[1..]);
+                ("-S".into(), a)
+            }
+            "--upgrade" => {
+                let mut a: Vec<String> = vec!["-U".into()];
+                a.extend_from_slice(&raw_args[1..]);
+                ("-U".into(), a)
+            }
+            "--database" => {
+                let mut a: Vec<String> = vec!["-D".into()];
+                a.extend_from_slice(&raw_args[1..]);
+                ("-D".into(), a)
+            }
+            s if s.starts_with("-R") && s.len() > 2 => {
+                let mut a: Vec<String> = vec!["-R".into()];
+                for ch in s[2..].chars() {
+                    a.push(format!("-{ch}"));
+                }
+                a.extend_from_slice(&raw_args[1..]);
+                ("-R".into(), a)
+            }
+            _ => (first.clone(), raw_args.to_vec()),
+        }
+    };
+
+    let allowed_ops = ["-S", "-Syu", "-R", "-U", "-D"];
     if !allowed_ops.contains(&op.as_str()) {
         return Err(anyhow!("operation not allowed: {op}"));
     }
@@ -166,7 +203,7 @@ fn validate_pacman(args: &[String]) -> Result<()> {
         i += 1;
     }
 
-    if op == "-S" || op == "-Rns" || op == "-D" {
+    if op == "-S" || op == "-R" || op == "-D" {
         if pkgs.is_empty() {
             return Err(anyhow!("no packages supplied"));
         }
@@ -190,14 +227,51 @@ fn validate_pacman(args: &[String]) -> Result<()> {
 fn is_allowed_flag(flag: &str) -> bool {
     matches!(
         flag,
-        "--noconfirm" | "--needed" | "--noprogressbar" | "--asdeps" | "--asexplicit"
+        "--noconfirm"
+            | "--needed"
+            | "--noprogressbar"
+            | "--asdeps"
+            | "--asexplicit"
+            | "--nocheck"
+            | "--nodeps"
+            | "--nosave"
+            | "-n"
+            | "--downloadonly"
+            | "--print"
+            | "--quiet"
+            | "-q"
+            | "--verbose"
+            | "-v"
+            // short forms of pacman flags that are safe within the
+            // already-locked-down op whitelist (-S / -Syu / -R / -U / -D)
+            | "-d" // --nodeps          (-R / -S)
+            | "-c" // --clean           (-S / -R)
+            | "-u" // --upgrades / --unneeded (-S / -R)
+            | "-s" // --search / --recursive  (-S / -R)
+            | "-i" // --info            (-S / -R)
+            | "-l" // --list            (-S)
+            | "-g" // --groups          (-S)
+            | "-y" // --refresh         (-S)
     )
 }
 
 fn flag_takes_value(flag: &str) -> bool {
     matches!(
         flag,
-        "--config" | "--color" | "--overwrite" | "--dbpath" | "--root" | "--sysroot"
+        "--config"
+            | "--color"
+            | "--overwrite"
+            | "--dbpath"
+            | "--root"
+            | "--sysroot"
+            | "--ignore"
+            | "--ignore-group"
+            | "--cachedir"
+            | "--logfile"
+            | "--hookdir"
+            | "--gpgdir"
+            | "--arch"
+            | "--print-format"
     )
 }
 
@@ -225,9 +299,33 @@ fn validate_flag_value(flag: &str, value: &str) -> Result<()> {
                 return Err(anyhow!("unsafe --config path: {value}"));
             }
         }
-        "--dbpath" | "--root" | "--sysroot" => {
+        "--dbpath" | "--root" | "--sysroot" | "--cachedir" | "--logfile" | "--hookdir"
+        | "--gpgdir" => {
             if !value.starts_with('/') {
                 return Err(anyhow!("path for {flag} must be absolute"));
+            }
+        }
+        "--ignore" | "--ignore-group" => {
+            // pacman accepts comma-separated package / group names. Reuse the
+            // same character set as is_safe_pkg so a hostile value can't smuggle
+            // in shell metacharacters if the helper is ever invoked from a
+            // shell wrapper.
+            for token in value.split(',') {
+                if token.is_empty()
+                    || token.len() > 128
+                    || !token
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "+-._@".contains(c))
+                {
+                    return Err(anyhow!("invalid value for {flag}: {token}"));
+                }
+            }
+        }
+        "--arch" => {
+            if value.len() > 16
+                || !value.chars().all(|c| c.is_ascii_alphanumeric() || "_-".contains(c))
+            {
+                return Err(anyhow!("invalid value for --arch: {value}"));
             }
         }
         "--overwrite" => {
