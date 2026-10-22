@@ -1,5 +1,6 @@
 pub mod appstream;
 pub mod cache;
+pub mod icons;
 pub mod models;
 pub mod providers;
 pub mod runner;

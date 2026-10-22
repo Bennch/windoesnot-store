@@ -21,6 +21,7 @@ const DE: &[(&str, &str)] = &[
     ("View Installed", "Installierte anzeigen"),
     ("Featured", "Empfohlen"),
     ("Popular", "Beliebt"),
+    ("Our picks", "Unsere Empfehlungen"),
     ("Graphics", "Grafik"),
     ("Development", "Entwicklung"),
     ("Media", "Medien"),

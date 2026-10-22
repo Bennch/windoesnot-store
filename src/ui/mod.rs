@@ -30,6 +30,7 @@ use crate::i18n::{t, tf};
 
 pub mod details;
 pub mod home;
+pub mod home_data;
 pub mod installed;
 pub mod search;
 pub mod settings;
@@ -267,6 +268,9 @@ pub fn build_ui(app: &adw::Application) {
         flatpak_available: Arc::new(Mutex::new(crate::core::cache::command_exists("flatpak"))),
     };
 
+    // App icons for not-installed packages come from AppStream catalogues.
+    crate::core::icons::warm_up();
+
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("WinDoesNot Store")
@@ -327,7 +331,17 @@ pub fn build_ui(app: &adw::Application) {
     // Settings-style heading only: no logo, subtitle or hint.
     brand_icon.set_visible(false);
     brand_subtitle.set_visible(false);
+    // WinDoesNot wordmark followed by "Store"; the variant follows light/dark.
+    let brand_logo = gtk::Picture::new();
+    brand_logo.add_css_class("brand-logo");
+    brand_logo.set_can_shrink(true);
+    brand_logo.set_content_fit(gtk::ContentFit::Contain);
+    brand_logo.set_size_request(118, -1);
+    brand_logo.set_valign(gtk::Align::Center);
+    BRAND_LOGO.with(|slot| *slot.borrow_mut() = Some(brand_logo.clone()));
+    brand_text.set_valign(gtk::Align::Center);
     sidebar_brand.append(&brand_icon);
+    sidebar_brand.append(&brand_logo);
     sidebar_brand.append(&brand_text);
 
     let sidebar_hint = gtk::Label::new(Some(t("One transaction at a time")));
@@ -503,7 +517,7 @@ pub fn build_ui(app: &adw::Application) {
     updates_page.bind(ctx.clone());
     settings_page.bind(ctx.clone());
     search_page.bind_search(ctx.clone(), handles.clone(), stack.clone());
-    home_page.bind(ctx.clone());
+    home_page.bind(ctx.clone(), handles.clone());
 
     let updates_page_refresh = updates_page.clone();
     let ctx_updates = ctx.clone();
@@ -1527,6 +1541,63 @@ fn themed_css(theme: ThemeMode) -> String {
         separator {
             background-color: $DIVIDER$;
         }
+        .brand-logo {
+            margin-right: 2px;
+        }
+        .banner {
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .banner-title {
+            font-size: 28px;
+            font-weight: 800;
+            color: #ffffff;
+        }
+        .banner-summary {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.85);
+        }
+        .banner-steam { background-image: linear-gradient(135deg, #0b1f3a, #1d4475); }
+        .banner-gimp { background-image: linear-gradient(135deg, #3a2414, #7a4a24); }
+        .banner-obs { background-image: linear-gradient(135deg, #17162b, #39306f); }
+        .banner-office { background-image: linear-gradient(135deg, #0f3a2c, #1a7352); }
+        .banner-localsend { background-image: linear-gradient(135deg, #0c3640, #137a86); }
+        button.banner-arrow {
+            border-radius: 999px;
+            min-width: 40px;
+            min-height: 40px;
+            padding: 0;
+            border: none;
+            background-color: rgba(0, 0, 0, 0.35);
+            color: #ffffff;
+        }
+        button.banner-arrow:hover {
+            background-color: rgba(0, 0, 0, 0.55);
+        }
+        button.category-tile {
+            min-height: 72px;
+            border-radius: 10px;
+            border: none;
+            color: #ffffff;
+        }
+        .category-label {
+            font-size: 17px;
+            font-weight: 800;
+        }
+        button.cat-create { background-image: linear-gradient(135deg, #7b4dbb, #4a5fd6); }
+        button.cat-work { background-image: linear-gradient(135deg, #b8661a, #e0a13a); }
+        button.cat-games { background-image: linear-gradient(135deg, #d4508f, #6a4ad8); }
+        button.cat-social { background-image: linear-gradient(135deg, #d63c6e, #ea7a52); }
+        button.cat-media { background-image: linear-gradient(135deg, #168a5f, #2bb57f); }
+        button.cat-develop { background-image: linear-gradient(135deg, #34373f, #50545f); }
+        button.category-tile:hover { opacity: 0.9; }
+        .letter-icon {
+            background-color: alpha(#fe6f2d, 0.18);
+            color: #fe6f2d;
+            border-radius: 12px;
+            font-size: 26px;
+            font-weight: 800;
+        }
     "#.to_string();
 
     let replacements = [
@@ -1621,6 +1692,12 @@ fn setup_css(theme: ThemeMode) {
         });
         provider.load_from_data(&themed_css(theme));
     });
+    let light = match theme {
+        ThemeMode::Light => true,
+        ThemeMode::System => !adw::StyleManager::default().is_dark(),
+        _ => false,
+    };
+    update_brand_logo(!light);
 }
 
 fn build_nav_row(icon_name: &str, title: &str) -> gtk::ListBoxRow {
@@ -1651,6 +1728,24 @@ fn build_nav_row(icon_name: &str, title: &str) -> gtk::ListBoxRow {
 
 thread_local! {
     static CURRENT_THEME: std::cell::Cell<ThemeMode> = std::cell::Cell::new(ThemeMode::System);
+    static BRAND_LOGO: RefCell<Option<gtk::Picture>> = RefCell::new(None);
+}
+
+/// Light wordmark on dark surfaces, dark wordmark on light ones.
+fn update_brand_logo(dark: bool) {
+    let bytes: &'static [u8] = if dark {
+        include_bytes!("../../assets/brand/windoesnot-logo-hell.png")
+    } else {
+        include_bytes!("../../assets/brand/windoesnot-logo-dunkel.png")
+    };
+    let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from_static(bytes)) else {
+        return;
+    };
+    BRAND_LOGO.with(|slot| {
+        if let Some(picture) = slot.borrow().as_ref() {
+            picture.set_paintable(Some(&texture));
+        }
+    });
 }
 
 /// Re-applies the active theme, e.g. after the desktop accent or light/dark mode changed.
