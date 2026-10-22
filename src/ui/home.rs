@@ -30,6 +30,7 @@ impl HomePage {
         root.set_vexpand(true);
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        header.add_css_class("page-title");
         let logo = logo_image(64);
         let title = gtk::Label::new(Some(t("WinDoesNot Store")));
         title.add_css_class("title-1");
@@ -73,6 +74,7 @@ impl HomePage {
         featured.set_min_children_per_line(1);
         featured.set_max_children_per_line(3);
         featured.set_column_spacing(12);
+        // Rows of equal-width tiles, as in the reference store layout.
         featured.set_row_spacing(12);
         featured.set_homogeneous(true);
         featured.set_selection_mode(gtk::SelectionMode::None);
@@ -88,6 +90,7 @@ impl HomePage {
         popular_grid.set_min_children_per_line(1);
         popular_grid.set_max_children_per_line(3);
         popular_grid.set_column_spacing(12);
+        // Rows of equal-width tiles, as in the reference store layout.
         popular_grid.set_row_spacing(12);
         popular_grid.set_homogeneous(true);
         popular_grid.set_selection_mode(gtk::SelectionMode::None);

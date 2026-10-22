@@ -9,6 +9,7 @@ const DE: &[(&str, &str)] = &[
     ("Installed", "Installiert"),
     ("Updates", "Updates"),
     ("Settings", "Einstellungen"),
+    ("Store", "Store"),
     ("Apps & updates", "Apps & Updates"),
     ("One transaction at a time", "Immer nur ein Vorgang gleichzeitig"),
     ("Queue ({})", "Warteschlange ({})"),

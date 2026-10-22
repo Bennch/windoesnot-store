@@ -39,6 +39,7 @@ impl UpdatesPage {
 
         let title = gtk::Label::new(Some(t("Updates")));
         title.add_css_class("title-2");
+        title.add_css_class("page-title");
         title.set_xalign(0.0);
         root.append(&title);
 

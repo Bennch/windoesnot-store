@@ -37,6 +37,7 @@ impl SearchPage {
 
         let title = gtk::Label::new(Some(t("Search")));
         title.add_css_class("title-2");
+        title.add_css_class("page-title");
         title.set_xalign(0.0);
         root.append(&title);
 
@@ -71,6 +72,7 @@ impl SearchPage {
         results.set_min_children_per_line(1);
         results.set_max_children_per_line(3);
         results.set_column_spacing(12);
+        // Rows of equal-width tiles, as in the reference store layout.
         results.set_row_spacing(12);
         results.set_homogeneous(true);
         results.set_selection_mode(gtk::SelectionMode::None);

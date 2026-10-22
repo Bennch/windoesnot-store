@@ -287,7 +287,10 @@ pub fn build_ui(app: &adw::Application) {
     let queue_button = gtk::Button::with_label(t("Queue (0)"));
     queue_button.add_css_class("suggested-action");
     queue_button.add_css_class("queue-button");
-    header.pack_end(&queue_button);
+    queue_button.set_halign(gtk::Align::End);
+    queue_button.set_valign(gtk::Align::Start);
+    queue_button.set_margin_top(30);
+    queue_button.set_margin_end(30);
 
     let sidebar = gtk::ListBox::new();
     sidebar.add_css_class("navigation-sidebar");
@@ -297,16 +300,13 @@ pub fn build_ui(app: &adw::Application) {
 
     sidebar.append(&build_nav_row("go-home-symbolic", t("Home")));
     sidebar.append(&build_nav_row("system-search-symbolic", t("Search")));
-    sidebar.append(&build_nav_row("drive-harddisk-symbolic", t("Installed")));
-    sidebar.append(&build_nav_row("software-update-available-symbolic", t("Updates")));
-    sidebar.append(&build_nav_row("emblem-system-symbolic", t("Settings")));
+    sidebar.append(&build_nav_row("view-app-grid-symbolic", t("Installed")));
+    sidebar.append(&build_nav_row("system-update-symbolic", t("Updates")));
+    sidebar.append(&build_nav_row("preferences-system-symbolic", t("Settings")));
 
     let sidebar_root = gtk::Box::new(gtk::Orientation::Vertical, 12);
     sidebar_root.add_css_class("sidebar-root");
-    sidebar_root.set_margin_top(10);
-    sidebar_root.set_margin_bottom(10);
-    sidebar_root.set_margin_start(10);
-    sidebar_root.set_margin_end(10);
+    sidebar_root.set_size_request(250, -1);
     sidebar_root.set_hexpand(false);
     sidebar_root.set_vexpand(true);
 
@@ -315,7 +315,7 @@ pub fn build_ui(app: &adw::Application) {
     let brand_icon = gtk::Image::from_icon_name("windoesnot");
     brand_icon.set_pixel_size(30);
     let brand_text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let brand_title = gtk::Label::new(Some(t("WinDoesNot Store")));
+    let brand_title = gtk::Label::new(Some(t("Store")));
     brand_title.add_css_class("sidebar-brand-title");
     brand_title.set_xalign(0.0);
     let brand_subtitle = gtk::Label::new(Some(t("Apps & updates")));
@@ -324,6 +324,9 @@ pub fn build_ui(app: &adw::Application) {
     brand_subtitle.set_xalign(0.0);
     brand_text.append(&brand_title);
     brand_text.append(&brand_subtitle);
+    // Settings-style heading only: no logo, subtitle or hint.
+    brand_icon.set_visible(false);
+    brand_subtitle.set_visible(false);
     sidebar_brand.append(&brand_icon);
     sidebar_brand.append(&brand_text);
 
@@ -334,9 +337,8 @@ pub fn build_ui(app: &adw::Application) {
     sidebar_hint.set_xalign(0.0);
 
     sidebar_root.append(&sidebar_brand);
-    sidebar_root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     sidebar_root.append(&sidebar);
-    sidebar_root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    sidebar_hint.set_visible(false);
     sidebar_root.append(&sidebar_hint);
 
     let stack = gtk::Stack::new();
@@ -357,13 +359,18 @@ pub fn build_ui(app: &adw::Application) {
     stack.set_visible_child_name("home");
 
     let nav_view = adw::NavigationView::new();
+    let stack_overlay = gtk::Overlay::new();
+    stack_overlay.set_child(Some(&stack));
+    stack_overlay.add_overlay(&queue_button);
     let main_page = adw::NavigationPage::builder()
         .title("WinDoesNot Store")
-        .child(&stack)
+        .child(&stack_overlay)
         .build();
     nav_view.push(&main_page);
 
     let split = adw::NavigationSplitView::new();
+    split.set_min_sidebar_width(250.0);
+    split.set_max_sidebar_width(250.0);
     split.set_hexpand(true);
     split.set_vexpand(true);
     let sidebar_page = adw::NavigationPage::builder()
@@ -398,7 +405,9 @@ pub fn build_ui(app: &adw::Application) {
 
     let toolbar_view = adw::ToolbarView::new();
     toolbar_view.add_css_class("aurora-toolbar");
-    toolbar_view.add_top_bar(&header);
+    // No header bar: the WinDoesNot window title bar (hyprbars) is enough,
+    // like the Quickshell settings window.
+    let _ = &header;
     toolbar_view.set_content(Some(&split));
     toolbar_view.set_vexpand(true);
 
@@ -667,7 +676,7 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
         }
 
         let mut results: Vec<_> = dedup.into_values().collect();
-        results.sort_by(|a, b| a.name.cmp(&b.name));
+        sort_by_relevance(&mut results, &query);
         let _ = done_tx.send(results);
     });
 
@@ -680,6 +689,30 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
         }
         Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
         Err(std::sync::mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+    });
+}
+
+/// Exact name matches first, then names starting with the query, then the rest;
+/// repository packages before AUR and Flatpak at equal relevance.
+fn sort_by_relevance(results: &mut [PackageSummary], query: &str) {
+    let query = query.trim().to_lowercase();
+    results.sort_by_cached_key(|pkg| {
+        let name = pkg.name.to_lowercase();
+        let rank = if name == query {
+            0
+        } else if name.starts_with(&query) {
+            1
+        } else if name.contains(&query) {
+            2
+        } else {
+            3
+        };
+        let source = match pkg.source {
+            PackageSource::Repo => 0,
+            PackageSource::Aur => 1,
+            PackageSource::Flatpak => 2,
+        };
+        (rank, source, name.len(), name)
     });
 }
 
@@ -1083,65 +1116,65 @@ fn palette_for_theme(theme: ThemeMode) -> ThemePalette {
                 palette_for_theme(ThemeMode::Light)
             }
         }
-        // WinDoesNot palette: flat Windows-11-like surfaces with the desktop accent.
+        // WinDoesNot palette: colours of the Quickshell settings window.
         ThemeMode::Light => ThemePalette {
-            toolbar_from: "#f3f3f3",
-            toolbar_to: "#f3f3f3",
-            header_bg: "#f3f3f3",
-            header_border: "rgba(0, 0, 0, 0.08)",
-            sidebar_from: "#ebebee",
-            sidebar_to: "#ebebee",
-            sidebar_border: "rgba(0, 0, 0, 0.07)",
-            nav_selected_from: "#fe6f2d",
-            nav_selected_to: "#fe6f2d",
-            nav_selected_shadow: "rgba(254, 111, 45, 0.20)",
-            card_from: "#ffffff",
-            card_to: "#fbfbfb",
-            card_border: "rgba(0, 0, 0, 0.08)",
-            page_bg: "#f3f3f3",
-            table_header_bg: "#ebebee",
-            table_header_border: "rgba(0, 0, 0, 0.07)",
-            table_header_text: "rgba(30, 30, 30, 0.72)",
-            scroller_border: "rgba(0, 0, 0, 0.07)",
-            scroller_bg: "#fafafa",
-            row_border: "rgba(0, 0, 0, 0.07)",
-            row_bg: "#ffffff",
-            row_hover_bg: "#f7f1ec",
+            toolbar_from: "#f2f2f2",
+            toolbar_to: "#f2f2f2",
+            header_bg: "#f2f2f2",
+            header_border: "#f2f2f2",
+            sidebar_from: "#e6e6e6",
+            sidebar_to: "#e6e6e6",
+            sidebar_border: "#e6e6e6",
+            nav_selected_from: "#c8c8c8",
+            nav_selected_to: "#c8c8c8",
+            nav_selected_shadow: "rgba(0, 0, 0, 0)",
+            card_from: "#f5f5f5",
+            card_to: "#f5f5f5",
+            card_border: "#d0d0d0",
+            page_bg: "#f2f2f2",
+            table_header_bg: "#f5f5f5",
+            table_header_border: "#d0d0d0",
+            table_header_text: "#666666",
+            scroller_border: "#d0d0d0",
+            scroller_bg: "#f2f2f2",
+            row_border: "#d0d0d0",
+            row_bg: "#f5f5f5",
+            row_hover_bg: "#e6e6e6",
             pill_from: "#fe6f2d",
             pill_to: "#fe6f2d",
-            pill_secondary_from: "#e4e4e8",
-            pill_secondary_to: "#e4e4e8",
-            pill_secondary_fg: "#2a2a2a",
+            pill_secondary_from: "#d0d0d0",
+            pill_secondary_to: "#d0d0d0",
+            pill_secondary_fg: "#444444",
         },
-        // WinDoesNot palette: flat Windows-11-like surfaces with the desktop accent.
+        // WinDoesNot palette: colours of the Quickshell settings window.
         ThemeMode::Dark => ThemePalette {
-            toolbar_from: "#1b1b1f",
-            toolbar_to: "#1b1b1f",
-            header_bg: "#1b1b1f",
-            header_border: "rgba(255, 255, 255, 0.06)",
-            sidebar_from: "#232327",
-            sidebar_to: "#232327",
-            sidebar_border: "rgba(255, 255, 255, 0.06)",
-            nav_selected_from: "#fe6f2d",
-            nav_selected_to: "#fe6f2d",
-            nav_selected_shadow: "rgba(254, 111, 45, 0.22)",
-            card_from: "#2b2b30",
-            card_to: "#28282c",
-            card_border: "rgba(255, 255, 255, 0.07)",
-            page_bg: "#202024",
-            table_header_bg: "#26262a",
-            table_header_border: "rgba(255, 255, 255, 0.06)",
-            table_header_text: "rgba(235, 235, 235, 0.72)",
-            scroller_border: "rgba(255, 255, 255, 0.06)",
-            scroller_bg: "#1e1e22",
-            row_border: "rgba(255, 255, 255, 0.06)",
-            row_bg: "#27272b",
-            row_hover_bg: "#303035",
+            toolbar_from: "#202020",
+            toolbar_to: "#202020",
+            header_bg: "#202020",
+            header_border: "#202020",
+            sidebar_from: "#171717",
+            sidebar_to: "#171717",
+            sidebar_border: "#171717",
+            nav_selected_from: "#2a2a2a",
+            nav_selected_to: "#2a2a2a",
+            nav_selected_shadow: "rgba(0, 0, 0, 0)",
+            card_from: "#141414",
+            card_to: "#141414",
+            card_border: "#3a3a3a",
+            page_bg: "#202020",
+            table_header_bg: "#141414",
+            table_header_border: "#3a3a3a",
+            table_header_text: "#888888",
+            scroller_border: "#3a3a3a",
+            scroller_bg: "#202020",
+            row_border: "#3a3a3a",
+            row_bg: "#141414",
+            row_hover_bg: "#1e1e1e",
             pill_from: "#fe6f2d",
             pill_to: "#fe6f2d",
-            pill_secondary_from: "#3a3a40",
-            pill_secondary_to: "#3a3a40",
-            pill_secondary_fg: "#e6e6e6",
+            pill_secondary_from: "#3a3a3a",
+            pill_secondary_to: "#3a3a3a",
+            pill_secondary_fg: "#cccccc",
         },
         ThemeMode::Ocean => ThemePalette {
             toolbar_from: "rgba(4, 28, 46, 0.96)",
@@ -1273,104 +1306,170 @@ fn themed_css(theme: ThemeMode) -> String {
             --accent-color: #fe783e;
             --accent-fg-color: #ffffff;
         }
-        .aurora-toolbar {
-            background-image: linear-gradient(135deg, $TOOLBAR_FROM$, $TOOLBAR_TO$);
-        }
-        .aurora-header {
-            background-color: $HEADER_BG$;
-            border-bottom: 1px solid $HEADER_BORDER$;
-            box-shadow: inset 0 -1px rgba(255, 255, 255, 0.04);
+        /* Layout and colours follow the Quickshell settings window (Settings.qml). */
+        window, .aurora-toolbar {
+            font-family: sans-serif;
+            background-color: $PAGE_BG$;
+            background-image: none;
+            color: $TEXT$;
         }
         .sidebar-root {
-            background-image: linear-gradient(180deg, $SIDEBAR_FROM$, $SIDEBAR_TO$);
-            border: 1px solid $SIDEBAR_BORDER$;
-            border-radius: 8px;
+            background-color: $SIDEBAR_FROM$;
+            background-image: none;
+            border: none;
+            border-radius: 0;
         }
         .sidebar-brand {
-            padding: 4px 2px;
+            padding: 40px 20px 30px 20px;
         }
         .sidebar-brand-title {
+            font-size: 20px;
             font-weight: 700;
-            letter-spacing: 0.2px;
-        }
-        .sidebar-brand-subtitle {
-            font-size: 11px;
-        }
-        .sidebar-hint {
-            font-size: 11px;
-            padding: 2px 4px;
+            color: $TEXT$;
         }
         .aurora-nav {
             background: transparent;
             border: none;
+            padding: 0 10px 30px 10px;
         }
         .aurora-nav row {
-            margin: 2px 0;
+            margin: 0 0 8px 0;
+            padding: 0;
             border-radius: 6px;
-            min-height: 40px;
-            transition: all 180ms ease;
+            min-height: 45px;
+            color: $NAV_TEXT$;
+            background-color: transparent;
+            background-image: none;
+            box-shadow: none;
+            outline: none;
         }
-        .aurora-nav row:selected {
-            background-image: linear-gradient(135deg, $NAV_SELECTED_FROM$, $NAV_SELECTED_TO$);
-            color: #ffffff;
-            box-shadow: 0 6px 18px $NAV_SELECTED_SHADOW$;
+        .aurora-nav row:hover {
+            background-color: $NAV_HOVER$;
+        }
+        .aurora-nav row:selected,
+        .aurora-nav row:selected:hover {
+            background-color: $NAV_SELECTED_FROM$;
+            background-image: none;
+            color: $NAV_TEXT$;
+            box-shadow: none;
         }
         .nav-row {
-            padding: 8px 10px;
+            padding: 0 10px 0 4px;
+        }
+        .nav-indicator {
+            border-radius: 2px;
+            background-color: transparent;
+        }
+        .aurora-nav row:selected .nav-indicator {
+            background-color: #fe6f2d;
         }
         .nav-label {
-            font-weight: 600;
-            letter-spacing: 0.15px;
-        }
-        .queue-button {
-            font-weight: 700;
-            padding: 6px 14px;
-            border-radius: 10px;
-        }
-        .card {
-            background-image: linear-gradient(170deg, $CARD_FROM$, $CARD_TO$);
-            border-radius: 8px;
-            border: 1px solid $CARD_BORDER$;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
-            padding: 14px;
-        }
-        .package-card {
-            min-height: 248px;
+            font-size: 14px;
+            font-weight: 400;
         }
         .page-root {
-            background-color: $PAGE_BG$;
-            border-radius: 8px;
-            padding: 8px;
+            background-color: transparent;
+            border-radius: 0;
+            padding: 18px;
+        }
+        .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: $TEXT$;
+            padding-bottom: 14px;
+            border-bottom: 1px solid $DIVIDER$;
+        }
+        .title-1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: $TEXT$;
+        }
+        .title-2, .title-3, .title-4 {
+            color: $TEXT$;
+        }
+        flowbox, flowboxchild, flowboxchild:hover, flowboxchild:selected, list.package-list {
+            background-color: transparent;
+            background-image: none;
+            box-shadow: none;
         }
         .page-controls {
             padding: 4px 0;
         }
-        .table-header {
-            padding: 2px 8px;
+        button {
             border-radius: 10px;
-            background-color: $TABLE_HEADER_BG$;
-            border: 1px solid $TABLE_HEADER_BORDER$;
+            min-height: 34px;
+            padding: 0 14px;
+            font-size: 13px;
+            background-color: transparent;
+            background-image: none;
+            border: 1px solid $BUTTON_BORDER$;
+            color: $NAV_TEXT$;
+            box-shadow: none;
+        }
+        button:hover {
+            background-color: $NAV_HOVER$;
+        }
+        button.suggested-action {
+            background-color: #fe6f2d;
+            border-color: #fe6f2d;
+            color: #ffffff;
+        }
+        button.suggested-action:hover {
+            background-color: shade(#fe6f2d, 1.08);
+        }
+        button.flat, .aurora-nav button {
+            border-color: transparent;
+        }
+        .queue-button {
+            font-weight: 600;
+        }
+        entry, searchbar entry, .search-entry, dropdown > button, spinbutton {
+            border-radius: 6px;
+            min-height: 34px;
+            background-color: $CARD_FROM$;
+            border: 1px solid $CARD_BORDER$;
+            box-shadow: none;
+        }
+        .card {
+            background-color: $CARD_FROM$;
+            background-image: none;
+            border-radius: 10px;
+            border: 1px solid $CARD_BORDER$;
+            box-shadow: none;
+            padding: 16px;
+        }
+        .package-card {
+            min-height: 96px;
+            padding: 14px 16px;
+        }
+        .package-card:hover {
+            background-color: $ROW_HOVER_BG$;
+        }
+        .table-header {
+            padding: 6px 12px;
+            border-radius: 6px;
+            background-color: transparent;
+            border: none;
+            border-bottom: 1px solid $DIVIDER$;
         }
         .table-header-label {
-            color: $TABLE_HEADER_TEXT$;
-            font-weight: 700;
-            letter-spacing: 0.4px;
-            font-size: 11px;
-            text-transform: uppercase;
+            color: $DIM$;
+            font-weight: 600;
+            font-size: 12px;
         }
         .table-subtext {
-            font-size: 11px;
-            opacity: 0.88;
+            font-size: 12px;
+            color: $DIM$;
         }
         .content-scroller {
-            border: 1px solid $SCROLLER_BORDER$;
-            border-radius: 12px;
-            background-color: $SCROLLER_BG$;
+            border: none;
+            border-radius: 0;
+            background-color: transparent;
         }
         .package-row,
         .update-row {
-            border-radius: 6px;
-            margin: 4px 6px;
+            border-radius: 10px;
+            margin: 4px 0;
             border: 1px solid $ROW_BORDER$;
             background-color: $ROW_BG$;
         }
@@ -1380,53 +1479,53 @@ fn themed_css(theme: ThemeMode) -> String {
         }
         .package-row-inner,
         .update-row-inner {
-            padding: 8px 10px;
+            padding: 8px 12px;
         }
         .pill {
-            background-image: linear-gradient(135deg, $PILL_FROM$, $PILL_TO$);
-            color: #f5f9ff;
-            border-radius: 999px;
-            padding: 2px 9px;
+            background-color: alpha(#fe6f2d, 0.18);
+            background-image: none;
+            color: #fe6f2d;
+            border-radius: 9px;
+            padding: 1px 8px;
             font-weight: 700;
-            letter-spacing: 0.2px;
-            font-size: 11px;
+            font-size: 10px;
         }
         .pill-secondary {
-            background-image: linear-gradient(135deg, $PILL_SECONDARY_FROM$, $PILL_SECONDARY_TO$);
+            background-color: $PILL_SECONDARY_FROM$;
+            background-image: none;
             color: $PILL_SECONDARY_FG$;
-            border-radius: 999px;
-            padding: 2px 9px;
+            border-radius: 9px;
+            padding: 1px 8px;
             font-weight: 700;
-            font-size: 11px;
-            letter-spacing: 0.2px;
+            font-size: 10px;
         }
         .log-drawer-root {
-            background-color: #272b34;
-            border-top: 1px solid $TABLE_HEADER_BORDER$;
+            background-color: $SIDEBAR_FROM$;
+            border-top: 1px solid $DIVIDER$;
         }
         .log-drawer-header {
-            background-color: #2f3440;
-            border-bottom: 1px solid $TABLE_HEADER_BORDER$;
+            background-color: $SIDEBAR_FROM$;
+            border-bottom: 1px solid $DIVIDER$;
         }
         .log-drawer-scroller,
         .log-drawer-scroller > viewport,
         .log-drawer-scroller textview,
         .log-drawer-scroller textview text {
-            background-color: #232831;
-            color: #e5eaf3;
+            background-color: $CARD_FROM$;
+            color: $TEXT$;
+            font-family: monospace;
         }
         .log-resize-handle {
-            min-height: 10px;
+            min-height: 6px;
             padding: 0;
             margin: 0;
-            border-bottom: 1px solid $TABLE_HEADER_BORDER$;
-            background-color: #3a404c;
-        }
-        .log-resize-handle:hover {
-            background-color: #4a5160;
+            background-color: $DIVIDER$;
         }
         .dim-label {
-            color: @dim_label_color;
+            color: $DIM$;
+        }
+        separator {
+            background-color: $DIVIDER$;
         }
     "#.to_string();
 
@@ -1462,6 +1561,27 @@ fn themed_css(theme: ThemeMode) -> String {
     for (from, to) in replacements {
         css = css.replace(from, to);
     }
+    let light = match theme {
+        ThemeMode::Light => true,
+        ThemeMode::System => !adw::StyleManager::default().is_dark(),
+        _ => false,
+    };
+    // Text, divider and hover colours from Settings.qml (dark / light).
+    let (text, nav_text, dim, divider, nav_hover, button_border) = if light {
+        ("#1a1a1a", "#555555", "#666666", "#d0d0d0", "#dedede", "#cccccc")
+    } else {
+        ("#ffffff", "#aaaaaa", "#888888", "#3a3a3a", "#1e1e1e", "#555555")
+    };
+    for (from, to) in [
+        ("$TEXT$", text),
+        ("$NAV_TEXT$", nav_text),
+        ("$DIM$", dim),
+        ("$DIVIDER$", divider),
+        ("$NAV_HOVER$", nav_hover),
+        ("$BUTTON_BORDER$", button_border),
+    ] {
+        css = css.replace(from, to);
+    }
     if matches!(theme, ThemeMode::System | ThemeMode::Light | ThemeMode::Dark) {
         // The WinDoesNot palettes use the desktop accent from the shared settings.
         let accent = crate::desktop::accent();
@@ -1474,10 +1594,10 @@ fn themed_css(theme: ThemeMode) -> String {
             .replace("@define-color accent_fg_color #ffffff;", &format!("@define-color accent_fg_color {foreground};"))
             .replace("--accent-fg-color: #ffffff;", &format!("--accent-fg-color: {foreground};"))
             .replace("color: #f5f9ff;", &format!("color: {foreground};"));
-        css = css.replacen(
-            "            color: #ffffff;\n            box-shadow: 0 6px 18px",
-            &format!("            color: {foreground};\n            box-shadow: 0 6px 18px"),
-            1,
+        // Runs after the accent swap above, so match the substituted colour.
+        css = css.replace(
+            &format!("border-color: {accent};\n            color: #ffffff;"),
+            &format!("border-color: {accent};\n            color: {foreground};"),
         );
     }
     css
@@ -1505,11 +1625,18 @@ fn setup_css(theme: ThemeMode) {
 
 fn build_nav_row(icon_name: &str, title: &str) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     content.add_css_class("nav-row");
 
+    // Accent bar of the active entry, as in the Quickshell settings.
+    let indicator = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    indicator.add_css_class("nav-indicator");
+    indicator.set_size_request(3, 22);
+    indicator.set_valign(gtk::Align::Center);
+    content.append(&indicator);
+
     let icon = gtk::Image::from_icon_name(icon_name);
-    icon.set_pixel_size(18);
+    icon.set_pixel_size(20);
 
     let label = gtk::Label::new(Some(title));
     label.add_css_class("nav-label");
