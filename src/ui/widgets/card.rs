@@ -93,7 +93,16 @@ where
 
     let details_fn = Rc::new(on_details);
     let gesture = gtk::GestureClick::new();
-    gesture.connect_pressed(move |_, _, _, _| (details_fn.as_ref())());
+    let (tile, action) = (root.downgrade(), button.downgrade());
+    gesture.connect_pressed(move |_, _, x, y| {
+        let (Some(tile), Some(action)) = (tile.upgrade(), action.upgrade()) else { return };
+        let on_button = tile
+            .pick(x, y, gtk::PickFlags::DEFAULT)
+            .is_some_and(|target| target == action.clone().upcast::<gtk::Widget>() || target.is_ancestor(&action));
+        if !on_button {
+            (details_fn.as_ref())();
+        }
+    });
     root.add_controller(gesture);
 
     (root, button)

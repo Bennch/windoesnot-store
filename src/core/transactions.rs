@@ -135,7 +135,9 @@ fn aur_command(helper: AurHelperKind, op: &str, pkg: Option<&str>, noconfirm: &[
     if op == "-Syu" { args.push("--needed".to_string()); }
     args.extend(noconfirm.to_vec());
     if let Some(pkg) = pkg {
-        args.push(pkg.to_string());
+        // Removal works on installed names; installs must not resolve to a repo
+        // package that merely provides the same name (pfetch -> pfetch-rs).
+        args.push(if op == "-Rns" { pkg.to_string() } else { format!("aur/{pkg}") });
     }
 
     // Best-effort: ask yay/paru to use pkexec + windoesnot-store-helper for pacman calls.
@@ -209,7 +211,19 @@ mod tests {
         assert_eq!(plan.commands[0].args[2], "-Syu");
         let aur = &plan.commands[1];
         assert_eq!(aur.program, "paru");
-        assert_eq!(&aur.args[..4], ["-Syu", "--needed", "--noconfirm", "localsend-bin"]);
+        // aur/ keeps paru from picking a repo package that provides the name.
+        assert_eq!(&aur.args[..4], ["-Syu", "--needed", "--noconfirm", "aur/localsend-bin"]);
+    }
+
+    #[test]
+    fn aur_removal_uses_the_installed_name() {
+        let queue = TransactionQueue { actions: vec![
+            action(PackageSource::Aur, ActionKind::Remove, "localsend-bin"),
+        ] };
+        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        let aur = plan.commands.iter().find(|command| command.program == "paru").unwrap();
+        assert!(aur.args.iter().any(|arg| arg == "localsend-bin"));
+        assert!(!aur.args.iter().any(|arg| arg.starts_with("aur/")));
     }
 
     #[test]

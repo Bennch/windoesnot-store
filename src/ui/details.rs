@@ -63,7 +63,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
 
     let button_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let installed_state = Rc::new(RefCell::new(summary.installed));
-    let action_btn = gtk::Button::with_label(if summary.installed { "Remove" } else { "Install" });
+    let action_btn = gtk::Button::with_label(if summary.installed { t("Remove") } else { t("Install") });
     action_btn.add_css_class("suggested-action");
     let update_btn = gtk::Button::with_label(t("Update"));
     update_btn.set_visible(summary.installed);
@@ -149,7 +149,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     &[&if details.installed { t("yes") } else { t("no") }],
                 ));
                 *installed_state_clone.borrow_mut() = details.installed;
-                action_btn_clone.set_label(if details.installed { "Remove" } else { "Install" });
+                action_btn_clone.set_label(if details.installed { t("Remove") } else { t("Install") });
                 update_btn_clone.set_visible(details.installed);
                 if let Some(size) = &details.size {
                     size_clone.set_text(&tf("Size: {}", &[size]));

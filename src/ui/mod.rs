@@ -106,7 +106,7 @@ impl QueueController {
         });
         drop(queue);
         self.update_label();
-        self.toast("Added to queue");
+        self.toast(t("Added to queue"));
     }
 
     pub fn add_remove(&self, name: String, source: PackageSource) {
@@ -119,7 +119,7 @@ impl QueueController {
         });
         drop(queue);
         self.update_label();
-        self.toast("Added to queue");
+        self.toast(t("Added to queue"));
     }
 
     pub fn add_upgrade_repo(&self) {
@@ -179,8 +179,8 @@ impl QueueController {
         if queue.is_empty() {
             let dialog = adw::MessageDialog::new(
                 Some(&self.parent),
-                Some("Queue is empty"),
-                Some("Add install/remove actions first."),
+                Some(t("Queue is empty")),
+                Some(t("Add install/remove actions first.")),
             );
             dialog.add_response("ok", t("OK"));
             dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
@@ -190,10 +190,17 @@ impl QueueController {
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
         for action in &queue.actions {
-            let row = gtk::Label::new(Some(&format!(
-                "{:?} {} ({:?})",
-                action.kind, action.name, action.source
-            )));
+            let source = match action.source {
+                PackageSource::Repo => "Pacman",
+                PackageSource::Aur => "AUR",
+                PackageSource::Flatpak => "Flatpak",
+            };
+            let template = match action.kind {
+                ActionKind::Install => "Install {} ({})",
+                ActionKind::Remove => "Remove {} ({})",
+                ActionKind::Upgrade => "Update {} ({})",
+            };
+            let row = gtk::Label::new(Some(&tf(template, &[&action.name, &source])));
             row.set_xalign(0.0);
             content.append(&row);
         }
@@ -206,7 +213,7 @@ impl QueueController {
 
         let dialog = adw::MessageDialog::new(
             Some(&self.parent),
-            Some("Review Transactions"),
+            Some(t("Review Transactions")),
             Some(t("Installing native packages also updates the whole system. Matching WinDoesNot components are required.")),
         );
         dialog.set_extra_child(Some(&scroller));
@@ -805,6 +812,7 @@ fn run_plan(
     let toasts = toasts.clone();
     let prompt_open = Rc::new(RefCell::new(false));
     let lock_hint_shown = Rc::new(RefCell::new(false));
+    let abi_conflict = Rc::new(RefCell::new(false));
     let in_progress = ctx_clone.transaction_in_progress.clone();
 
     // Slot that always points at the handle of the currently-running
@@ -834,8 +842,8 @@ fn run_plan(
             log_drawer.set_cancel_handler(None::<fn()>);
             let dialog = adw::MessageDialog::new(
                 Some(&parent),
-                Some("Transactions complete"),
-                Some("All actions finished."),
+                Some(t("Transactions complete")),
+                Some(t("All actions finished.")),
             );
             dialog.add_response("ok", t("OK"));
             dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
@@ -888,6 +896,7 @@ fn run_plan(
         let parent = parent.clone();
         let prompt_open = prompt_open.clone();
         let lock_hint_shown = lock_hint_shown.clone();
+        let abi_conflict = abi_conflict.clone();
         let in_progress = in_progress.clone();
         let current_handle = current_handle.clone();
         let allow_prompt_dialog = terminal_mode == TerminalMode::Integrated;
@@ -905,6 +914,9 @@ fn run_plan(
                             );
                         }
                         log_drawer.append_line(&line, log_limit);
+                        if is_component_abi_conflict(&line) {
+                            *abi_conflict.borrow_mut() = true;
+                        }
                         if !*lock_hint_shown.borrow() {
                             let lower = line.to_lowercase();
                             if lower.contains("unable to lock database")
@@ -929,6 +941,19 @@ fn run_plan(
                                 "Command failed ({})",
                                 &[&code],
                             )));
+                            // The queue stops at the first failure; say so instead of
+                            // leaving only the raw log.
+                            let (heading, body) = if *abi_conflict.borrow() {
+                                (t("System update not possible yet"),
+                                 t("The new system packages need matching WinDoesNot components, which are not available yet. Nothing was changed and the remaining actions were not run. Please try again later."))
+                            } else {
+                                (t("Action failed"),
+                                 t("The remaining actions were not run. Details are in the log."))
+                            };
+                            let dialog = adw::MessageDialog::new(Some(&parent), Some(heading), Some(body));
+                            dialog.add_response("ok", t("OK"));
+                            dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
+                            dialog.present();
                         } else if let Some(next) = &*next_inner.borrow() {
                             next();
                         } else {
@@ -969,6 +994,12 @@ fn active_package_managers() -> Result<Vec<String>, String> {
         }
     }
     Ok(active)
+}
+
+/// pacman refuses a full upgrade because a WinDoesNot package pins the exact
+/// Hyprland/Qt build it was compiled against.
+fn is_component_abi_conflict(line: &str) -> bool {
+    line.contains("breaks dependency") && line.contains("required by windoesnot-")
 }
 
 fn should_prompt(line: &str) -> bool {
@@ -1765,4 +1796,20 @@ pub(crate) fn apply_theme(theme: ThemeMode) {
         | ThemeMode::Graphite => manager.set_color_scheme(adw::ColorScheme::ForceDark),
     }
     setup_css(theme);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_component_abi_conflict;
+
+    #[test]
+    fn detects_pinned_component_conflicts_only() {
+        assert!(is_component_abi_conflict(
+            ":: installing hyprland (0.56.2-5) breaks dependency 'hyprland=0.56.2-4' required by windoesnot-plugins"
+        ));
+        assert!(!is_component_abi_conflict(
+            ":: installing foo (2-1) breaks dependency 'foo=1-1' required by bar"
+        ));
+        assert!(!is_component_abi_conflict("error: failed to prepare transaction (could not satisfy dependencies)"));
+    }
 }
