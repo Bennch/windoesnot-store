@@ -14,6 +14,8 @@ optdepends=('archlinux-appstream-data: icons for repository apps that are not in
             'paru: AUR packages'
             'yay: AUR packages')
 makedepends=('cargo' 'clang' 'perl')
+# ring's C objects would be GCC-LTO bitcode, which the Rust linker cannot read.
+options=('!lto')
 install=windoesnot-store.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')

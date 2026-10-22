@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="docs/brand/windoesnot-logo-dunkel.png#gh-light-mode-only" alt="WinDoesNot" width="320">
+  <img src="docs/brand/windoesnot-logo-hell.png#gh-dark-mode-only" alt="WinDoesNot" width="320">
+</p>
+
 # WinDoesNot Store
 
 The app store of the [WinDoesNot](https://windoesnot.me) desktop: curated
