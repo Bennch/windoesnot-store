@@ -10,7 +10,7 @@ pub struct AuroraApp {
 impl AuroraApp {
     pub fn new() -> Self {
         let app = adw::Application::builder()
-            .application_id("io.github.ahmoodio.aurora")
+            .application_id("me.windoesnot.Store")
             .build();
 
         app.connect_startup(|_| {

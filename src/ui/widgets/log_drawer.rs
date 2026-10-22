@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{gdk, gio};
+use crate::i18n::{t, tf};
 
 const DEFAULT_LOG_LIMIT: usize = 1000;
 const DEFAULT_LOG_HEIGHT: i32 = 320;
@@ -33,20 +34,20 @@ impl LogDrawer {
         header.set_margin_start(8);
         header.set_margin_end(8);
 
-        let title = gtk::Label::new(Some("Logs"));
+        let title = gtk::Label::new(Some(t("Logs")));
         title.add_css_class("title-4");
         title.set_xalign(0.0);
 
         let minimize_btn = gtk::Button::from_icon_name("pan-down-symbolic");
         let close_btn = gtk::Button::from_icon_name("window-close-symbolic");
-        let cancel_btn = gtk::Button::with_label("Cancel");
+        let cancel_btn = gtk::Button::with_label(t("Cancel"));
         cancel_btn.add_css_class("destructive-action");
         cancel_btn.set_sensitive(false);
-        cancel_btn.set_tooltip_text(Some("Cancel the running transaction"));
-        let copy_btn = gtk::Button::with_label("Copy");
-        let save_btn = gtk::Button::with_label("Save");
-        let clear_btn = gtk::Button::with_label("Clear");
-        let clear_lock_btn = gtk::Button::with_label("Clear Lock");
+        cancel_btn.set_tooltip_text(Some(t("Cancel the running transaction")));
+        let copy_btn = gtk::Button::with_label(t("Copy"));
+        let save_btn = gtk::Button::with_label(t("Save"));
+        let clear_btn = gtk::Button::with_label(t("Clear"));
+        let clear_lock_btn = gtk::Button::with_label(t("Clear Lock"));
 
         header.append(&title);
         header.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
@@ -110,7 +111,7 @@ impl LogDrawer {
         let lines_save = lines.clone();
         save_btn.connect_clicked(move |_| {
             let dialog = gtk::FileDialog::new();
-            dialog.set_title("Save Logs");
+            dialog.set_title(t("Save Logs"));
             let text = lines_save.borrow().join("\n");
             dialog.save(None::<&gtk::Window>, gio::Cancellable::NONE, move |res| {
                 if let Ok(file) = res {
@@ -147,7 +148,7 @@ impl LogDrawer {
                         &lines_lock,
                         &buffer_lock,
                         &text_view_lock,
-                        &format!("Safety check failed: {err}"),
+                        &tf("Safety check failed: {}", &[&err]),
                         DEFAULT_LOG_LIMIT,
                     );
                     return;
@@ -159,9 +160,9 @@ impl LogDrawer {
                     &lines_lock,
                     &buffer_lock,
                     &text_view_lock,
-                    &format!(
+                    &tf(
                         "Refusing to clear pacman lock because these processes are active: {}",
-                        running.join(", ")
+                        &[&running.join(", ")],
                     ),
                     DEFAULT_LOG_LIMIT,
                 );
@@ -191,7 +192,7 @@ impl LogDrawer {
                         &lines_lock,
                         &buffer_lock,
                         &text_view_lock,
-                        &format!("Failed to clear pacman lock: {err}"),
+                        &tf("Failed to clear pacman lock: {}", &[&err]),
                         DEFAULT_LOG_LIMIT,
                     );
                 }

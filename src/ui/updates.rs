@@ -8,6 +8,7 @@ use libadwaita as adw;
 
 use crate::core::models::{ActionKind, AurHelperKind, PackageSource, TransactionAction};
 use crate::ui::AppContext;
+use crate::i18n::{t, tf};
 
 #[derive(Clone)]
 pub struct UpdatesPage {
@@ -36,7 +37,7 @@ impl UpdatesPage {
         root.set_hexpand(true);
         root.set_vexpand(true);
 
-        let title = gtk::Label::new(Some("Updates"));
+        let title = gtk::Label::new(Some(t("Updates")));
         title.add_css_class("title-2");
         title.set_xalign(0.0);
         root.append(&title);
@@ -49,26 +50,26 @@ impl UpdatesPage {
         info.set_xalign(0.0);
         root.append(&info);
 
-        let status = gtk::Label::new(Some("No update data"));
+        let status = gtk::Label::new(Some(t("No update data")));
         status.add_css_class("dim-label");
         status.set_xalign(0.0);
         root.append(&status);
 
         let search = gtk::SearchEntry::new();
-        search.set_placeholder_text(Some("Filter updates"));
+        search.set_placeholder_text(Some(t("Filter updates")));
         root.append(&search);
         let source_filter =
-            gtk::DropDown::from_strings(&["All Sources", "Pacman", "AUR", "Flatpak"]);
+            gtk::DropDown::from_strings(&[t("All Sources"), t("Pacman"), t("AUR"), t("Flatpak")]);
         source_filter.set_selected(0);
         root.append(&source_filter);
 
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         buttons.add_css_class("page-controls");
-        let check_button = gtk::Button::with_label("Check Updates");
-        let select_all_button = gtk::Button::with_label("Select All");
-        let clear_selection_button = gtk::Button::with_label("Select None");
-        let apply_selected_button = gtk::Button::with_label("Update Selected");
-        let apply_button = gtk::Button::with_label("Update All");
+        let check_button = gtk::Button::with_label(t("Check Updates"));
+        let select_all_button = gtk::Button::with_label(t("Select All"));
+        let clear_selection_button = gtk::Button::with_label(t("Select None"));
+        let apply_selected_button = gtk::Button::with_label(t("Update Selected"));
+        let apply_button = gtk::Button::with_label(t("Update All"));
         // WinDoesNot: no per-package updates. Updating a subset (e.g. hyprutils alone)
         // is a partial upgrade and breaks plugins built against the exact Hyprland ABI.
         apply_button.add_css_class("suggested-action");
@@ -78,9 +79,9 @@ impl UpdatesPage {
 
         let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         header_row.add_css_class("table-header");
-        header_row.append(&header_label("Package", true, 0));
-        header_row.append(&header_label("Source", false, 10));
-        header_row.append(&header_label("Action", false, 10));
+        header_row.append(&header_label(t("Package"), true, 0));
+        header_row.append(&header_label(t("Source"), false, 10));
+        header_row.append(&header_label(t("Action"), false, 10));
         root.append(&header_row);
 
         let list = gtk::ListBox::new();
@@ -223,9 +224,9 @@ impl UpdatesPage {
                 if let Some(toasts) = notify.as_ref() {
                     let count = all_updates.borrow().len();
                     if count > 0 {
-                        toasts.add_toast(adw::Toast::new(&format!(
+                        toasts.add_toast(adw::Toast::new(&tf(
                             "{} updates available",
-                            count
+                            &[&count],
                         )));
                     }
                 }
@@ -290,17 +291,16 @@ fn render_updates(
 
     if filtered.is_empty() {
         if items.is_empty() {
-            status.set_text("System is up to date");
+            status.set_text(t("System is up to date"));
         } else {
-            status.set_text("No updates match selected filters");
+            status.set_text(t("No updates match selected filters"));
         }
         return;
     }
 
-    status.set_text(&format!(
+    status.set_text(&tf(
         "{} updates shown ({} total)",
-        filtered.len(),
-        items.len()
+        &[&filtered.len(), &items.len()],
     ));
     for (action, display) in filtered {
         let check = gtk::CheckButton::new();

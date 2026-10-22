@@ -5,6 +5,7 @@ use adw::prelude::*;
 use crate::core::cache::{clear_screenshots_cache, save_settings};
 use crate::core::models::{AurHelperKind, TerminalEmulator, TerminalMode, ThemeMode};
 use crate::ui::{apply_theme, AppContext};
+use crate::i18n::{t, tf};
 
 #[derive(Clone)]
 pub struct SettingsPage {
@@ -25,25 +26,25 @@ impl SettingsPage {
         root.set_vexpand(true);
 
         let appearance_group = adw::PreferencesGroup::new();
-        appearance_group.set_title("Appearance");
+        appearance_group.set_title(t("Appearance"));
         let theme_labels = ThemeMode::all()
             .iter()
-            .map(|theme| theme.label())
+            .map(|theme| t(theme.label()))
             .collect::<Vec<_>>();
         let theme_list = gtk::StringList::new(&theme_labels);
         let theme_row = adw::ComboRow::new();
-        theme_row.set_title("Theme");
+        theme_row.set_title(t("Theme"));
         theme_row.set_model(Some(&theme_list));
         appearance_group.add(&theme_row);
 
         let terminal_mode_labels = TerminalMode::all()
             .iter()
-            .map(|mode| mode.label())
+            .map(|mode| t(mode.label()))
             .collect::<Vec<_>>();
         let terminal_mode_list = gtk::StringList::new(&terminal_mode_labels);
         let terminal_mode_row = adw::ComboRow::new();
-        terminal_mode_row.set_title("Command Output");
-        terminal_mode_row.set_subtitle("Integrated logs or external terminal window");
+        terminal_mode_row.set_title(t("Command Output"));
+        terminal_mode_row.set_subtitle(t("Integrated logs or external terminal window"));
         terminal_mode_row.set_model(Some(&terminal_mode_list));
         appearance_group.add(&terminal_mode_row);
 
@@ -53,36 +54,36 @@ impl SettingsPage {
             .collect::<Vec<_>>();
         let terminal_emulator_list = gtk::StringList::new(&terminal_emulator_labels);
         let terminal_emulator_row = adw::ComboRow::new();
-        terminal_emulator_row.set_title("Terminal Emulator");
-        terminal_emulator_row.set_subtitle("Used when Command Output is External Terminal");
+        terminal_emulator_row.set_title(t("Terminal Emulator"));
+        terminal_emulator_row.set_subtitle(t("Used when Command Output is External Terminal"));
         terminal_emulator_row.set_model(Some(&terminal_emulator_list));
         appearance_group.add(&terminal_emulator_row);
 
         let group = adw::PreferencesGroup::new();
-        group.set_title("General");
+        group.set_title(t("General"));
 
         let list = gtk::StringList::new(&["yay", "paru"]);
         let helper_row = adw::ComboRow::new();
-        helper_row.set_title("AUR Helper");
+        helper_row.set_title(t("AUR Helper"));
         helper_row.set_model(Some(&list));
 
         let noconfirm_row = adw::SwitchRow::new();
-        noconfirm_row.set_title("Allow --noconfirm");
-        noconfirm_row.set_subtitle("Applies to external terminal mode. Integrated logs are always non-interactive.");
+        noconfirm_row.set_title(t("Allow --noconfirm"));
+        noconfirm_row.set_subtitle(t("Applies to external terminal mode. Integrated logs are always non-interactive."));
 
         let cache_group = adw::PreferencesGroup::new();
-        cache_group.set_title("Cache");
-        let clear_cache = gtk::Button::with_label("Clear screenshots cache");
+        cache_group.set_title(t("Cache"));
+        let clear_cache = gtk::Button::with_label(t("Clear screenshots cache"));
         let cache_row = adw::ActionRow::new();
-        cache_row.set_title("Screenshots");
+        cache_row.set_title(t("Screenshots"));
         cache_row.add_suffix(&clear_cache);
         cache_row.set_activatable(false);
 
         let about_group = adw::PreferencesGroup::new();
-        about_group.set_title("About");
-        let about_btn = gtk::Button::with_label("About Aurora");
+        about_group.set_title(t("About"));
+        let about_btn = gtk::Button::with_label(t("About WinDoesNot Store"));
         let about_row = adw::ActionRow::new();
-        about_row.set_title("About");
+        about_row.set_title(t("About"));
         about_row.add_suffix(&about_btn);
         about_row.set_activatable(false);
         about_group.add(&about_row);
@@ -181,7 +182,7 @@ impl SettingsPage {
         self.about_btn.connect_clicked(move |_| {
             let about = adw::AboutWindow::new();
             about.set_application_name("WinDoesNot Store");
-            about.set_application_icon("io.github.ahmoodio.aurora");
+            about.set_application_icon("system-software-install");
             about.set_developer_name("ahmoodio");
             about.set_version(env!("CARGO_PKG_VERSION"));
             about.set_website("https://github.com/ahmoodio/yay-gui-manager");

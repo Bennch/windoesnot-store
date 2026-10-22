@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=WinDoesNot Store
+Name[de]=WinDoesNot Store
+Comment=Find, install and update apps
+Comment[de]=Apps finden, installieren und aktualisieren
+Exec=aurora
+Icon=system-software-install
+Terminal=false
+Categories=System;PackageManager;
+Keywords=apps;software;store;install;update;pacman;aur;flatpak;
+Keywords[de]=Apps;Programme;Software;Store;installieren;aktualisieren;pacman;aur;flatpak;
+StartupWMClass=me.windoesnot.Store

@@ -3,6 +3,7 @@ use gtk::pango;
 use std::rc::Rc;
 
 use crate::core::models::PackageSummary;
+use crate::i18n::{t, tf};
 
 pub fn build_card<F, G>(pkg: &PackageSummary, on_action: F, on_details: G) -> gtk::Box
 where
@@ -54,11 +55,11 @@ where
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     actions.set_halign(gtk::Align::End);
 
-    let button = gtk::Button::with_label("Install");
+    let button = gtk::Button::with_label(t("Install"));
     button.add_css_class("suggested-action");
     button.connect_clicked(move |_| on_action());
     let details_fn = Rc::new(on_details);
-    let details_btn = gtk::Button::with_label("Details");
+    let details_btn = gtk::Button::with_label(t("Details"));
     details_btn.add_css_class("flat");
     details_btn.connect_clicked({
         let details_fn = details_fn.clone();

@@ -6,6 +6,7 @@ use gtk::prelude::*;
 use crate::core::models::PackageSummary;
 use crate::ui::widgets::card;
 use crate::ui::{run_search, AppContext, UiHandles};
+use crate::i18n::{t, tf};
 
 const INITIAL_RESULT_LIMIT: usize = 90;
 const RESULT_PAGE_SIZE: usize = 90;
@@ -34,7 +35,7 @@ impl SearchPage {
         root.set_hexpand(true);
         root.set_vexpand(true);
 
-        let title = gtk::Label::new(Some("Search"));
+        let title = gtk::Label::new(Some(t("Search")));
         title.add_css_class("title-2");
         title.set_xalign(0.0);
         root.append(&title);
@@ -42,12 +43,12 @@ impl SearchPage {
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         controls.add_css_class("page-controls");
         let entry = gtk::SearchEntry::new();
-        entry.set_placeholder_text(Some("Search packages"));
+        entry.set_placeholder_text(Some(t("Search packages")));
         entry.set_hexpand(true);
 
-        let source_filter = gtk::DropDown::from_strings(&["All Sources", "Pacman", "AUR", "Flatpak"]);
+        let source_filter = gtk::DropDown::from_strings(&[t("All Sources"), t("Pacman"), t("AUR"), t("Flatpak")]);
         source_filter.set_selected(0);
-        let state_filter = gtk::DropDown::from_strings(&["All States", "Installed", "Not Installed"]);
+        let state_filter = gtk::DropDown::from_strings(&[t("All States"), t("Installed"), t("Not Installed")]);
         state_filter.set_selected(0);
 
         controls.append(&entry);
@@ -55,12 +56,12 @@ impl SearchPage {
         controls.append(&state_filter);
         root.append(&controls);
 
-        let status = gtk::Label::new(Some("Type a package name to search."));
+        let status = gtk::Label::new(Some(t("Type a package name to search.")));
         status.set_xalign(0.0);
         status.add_css_class("dim-label");
         root.append(&status);
 
-        let show_more_btn = gtk::Button::with_label("See More");
+        let show_more_btn = gtk::Button::with_label(t("See More"));
         show_more_btn.set_halign(gtk::Align::Center);
         show_more_btn.set_visible(false);
         root.append(&show_more_btn);
@@ -118,13 +119,13 @@ impl SearchPage {
                 let query = query.trim().to_string();
                 if query.is_empty() {
                     page.reset_result_limit();
-                    page.status.set_text("Type a package name to search.");
+                    page.status.set_text(t("Type a package name to search."));
                     page.clear_results();
                     return glib::ControlFlow::Break;
                 }
                 stack.set_visible_child_name("search");
                 page.reset_result_limit();
-                page.status.set_text(&format!("Searching for \"{query}\"..."));
+                page.status.set_text(&tf("Searching for \"{}\"...", &[&query]));
                 run_search(query, ctx.clone(), page.clone(), handles.clone());
                 glib::ControlFlow::Break
             });
@@ -187,7 +188,7 @@ impl SearchPage {
 
         if results.is_empty() {
             self.show_more_btn.set_visible(false);
-            self.status.set_text("No results found for selected filters.");
+            self.status.set_text(t("No results found for selected filters."));
             return;
         }
 
@@ -195,7 +196,7 @@ impl SearchPage {
         let limit = *self.result_limit.borrow();
         let shown = total.min(limit);
         self.status
-            .set_text(&format!("{shown} of {total} results"));
+            .set_text(&tf("{} of {} results", &[&shown, &total]));
         self.show_more_btn.set_visible(shown < total);
 
         for pkg in results.into_iter().take(limit) {

@@ -26,6 +26,7 @@ use crate::core::providers::pacman::Pacman;
 use crate::core::providers::{AurProvider, FlatpakProvider, PacmanProvider};
 use crate::core::runner::{CommandRunner, LogEvent, RunningHandle};
 use crate::core::transactions::{plan_transactions, TransactionPlan};
+use crate::i18n::{t, tf};
 
 pub mod details;
 pub mod home;
@@ -86,7 +87,7 @@ impl QueueController {
 
     fn update_label(&self) {
         let len = self.ctx.queue.lock().unwrap().len();
-        self.button.set_label(&format!("Queue ({len})"));
+        self.button.set_label(&tf("Queue ({})", &[&len]));
     }
 
     fn toast(&self, message: &str) {
@@ -153,9 +154,9 @@ impl QueueController {
         } else if added == total {
             self.toast("Selected updates queued");
         } else {
-            self.toast(&format!(
-                "Queued {added} update(s), skipped {} duplicates",
-                total - added
+            self.toast(&tf(
+                "Queued {} update(s), skipped {} duplicates",
+                &[&added, &(total - added)],
             ));
         }
     }
@@ -193,7 +194,7 @@ impl QueueController {
                 Some("Queue is empty"),
                 Some("Add install/remove actions first."),
             );
-            dialog.add_response("ok", "OK");
+            dialog.add_response("ok", t("OK"));
             dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
             dialog.present();
             return;
@@ -221,8 +222,8 @@ impl QueueController {
             Some("Confirm before executing."),
         );
         dialog.set_extra_child(Some(&scroller));
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("execute", "Execute");
+        dialog.add_response("cancel", t("Cancel"));
+        dialog.add_response("execute", t("Execute"));
         dialog.set_response_appearance("execute", adw::ResponseAppearance::Suggested);
 
         let ctx = self.ctx.clone();
@@ -237,7 +238,7 @@ impl QueueController {
                 let started = run_plan(plan, &ctx, &log_drawer, &parent, &toasts);
                 if started {
                     ctx.queue.lock().unwrap().clear();
-                    button.set_label("Queue (0)");
+                    button.set_label(t("Queue (0)"));
                 }
             }
             d.close();
@@ -277,12 +278,13 @@ pub fn build_ui(app: &adw::Application) {
         let icon_theme = gtk::IconTheme::for_display(&display);
         icon_theme.add_search_path("assets/icons");
     }
-    window.set_icon_name(Some("io.github.ahmoodio.aurora"));
+    // Freedesktop name: every icon theme (e.g. Win11) supplies its own store icon.
+    window.set_icon_name(Some("system-software-install"));
 
     let header = adw::HeaderBar::new();
     header.add_css_class("aurora-header");
 
-    let queue_button = gtk::Button::with_label("Queue (0)");
+    let queue_button = gtk::Button::with_label(t("Queue (0)"));
     queue_button.add_css_class("suggested-action");
     queue_button.add_css_class("queue-button");
     header.pack_end(&queue_button);
@@ -293,11 +295,11 @@ pub fn build_ui(app: &adw::Application) {
     sidebar.set_selection_mode(gtk::SelectionMode::Single);
     sidebar.set_activate_on_single_click(true);
 
-    sidebar.append(&build_nav_row("go-home-symbolic", "Home"));
-    sidebar.append(&build_nav_row("system-search-symbolic", "Search"));
-    sidebar.append(&build_nav_row("drive-harddisk-symbolic", "Installed"));
-    sidebar.append(&build_nav_row("software-update-available-symbolic", "Updates"));
-    sidebar.append(&build_nav_row("emblem-system-symbolic", "Settings"));
+    sidebar.append(&build_nav_row("go-home-symbolic", t("Home")));
+    sidebar.append(&build_nav_row("system-search-symbolic", t("Search")));
+    sidebar.append(&build_nav_row("drive-harddisk-symbolic", t("Installed")));
+    sidebar.append(&build_nav_row("software-update-available-symbolic", t("Updates")));
+    sidebar.append(&build_nav_row("emblem-system-symbolic", t("Settings")));
 
     let sidebar_root = gtk::Box::new(gtk::Orientation::Vertical, 12);
     sidebar_root.add_css_class("sidebar-root");
@@ -313,10 +315,10 @@ pub fn build_ui(app: &adw::Application) {
     let brand_icon = gtk::Image::from_icon_name("windoesnot");
     brand_icon.set_pixel_size(30);
     let brand_text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let brand_title = gtk::Label::new(Some("WinDoesNot Store"));
+    let brand_title = gtk::Label::new(Some(t("WinDoesNot Store")));
     brand_title.add_css_class("sidebar-brand-title");
     brand_title.set_xalign(0.0);
-    let brand_subtitle = gtk::Label::new(Some("Apps & updates"));
+    let brand_subtitle = gtk::Label::new(Some(t("Apps & updates")));
     brand_subtitle.add_css_class("dim-label");
     brand_subtitle.add_css_class("sidebar-brand-subtitle");
     brand_subtitle.set_xalign(0.0);
@@ -325,7 +327,7 @@ pub fn build_ui(app: &adw::Application) {
     sidebar_brand.append(&brand_icon);
     sidebar_brand.append(&brand_text);
 
-    let sidebar_hint = gtk::Label::new(Some("One transaction at a time"));
+    let sidebar_hint = gtk::Label::new(Some(t("One transaction at a time")));
     sidebar_hint.add_css_class("dim-label");
     sidebar_hint.add_css_class("sidebar-hint");
     sidebar_hint.set_wrap(true);
@@ -418,6 +420,11 @@ pub fn build_ui(app: &adw::Application) {
     window.set_content(Some(&toast_overlay));
 
     apply_theme(initial_theme);
+    crate::desktop::watch(reapply_theme);
+    // The System palette depends on the effective light/dark state.
+    adw::StyleManager::default().connect_dark_notify(|_| {
+        CURRENT_THEME.with(|current| setup_css(current.get()));
+    });
 
     let stack_for_home_search = stack.clone();
     home_page.open_search_btn.connect_clicked(move |_| {
@@ -501,7 +508,11 @@ pub fn build_ui(app: &adw::Application) {
     window.present();
 }
 
+static SEARCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, handles: UiHandles) {
+    // A slow earlier search (e.g. "l" while typing) must not overwrite newer results.
+    let generation = SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let (done_tx, done_rx) = std::sync::mpsc::channel::<Vec<PackageSummary>>();
     let ctx_thread = ctx.clone();
     std::thread::spawn(move || {
@@ -660,9 +671,11 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
         let _ = done_tx.send(results);
     });
 
-    glib::idle_add_local(move || match done_rx.try_recv() {
+    glib::timeout_add_local(std::time::Duration::from_millis(40), move || match done_rx.try_recv() {
         Ok(results) => {
-            search_page.set_results(results, &ctx, &handles);
+            if SEARCH_GENERATION.load(std::sync::atomic::Ordering::SeqCst) == generation {
+                search_page.set_results(results, &ctx, &handles);
+            }
             ControlFlow::Break
         }
         Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
@@ -704,10 +717,10 @@ fn run_plan(
         Ok(active) => active,
         Err(err) => {
             *ctx.transaction_in_progress.lock().unwrap() = false;
-            toasts.add_toast(adw::Toast::new("Failed to check package manager status"));
+            toasts.add_toast(adw::Toast::new(t("Failed to check package manager status")));
             log_drawer.set_visible(true);
             log_drawer.append_line(
-                &format!("Failed to check active package managers: {err}"),
+                &tf("Failed to check active package managers: {}", &[&err]),
                 ctx.runner.log_limit,
             );
             return false;
@@ -721,9 +734,9 @@ fn run_plan(
         ));
         log_drawer.set_visible(true);
         log_drawer.append_line(
-            &format!(
+            &tf(
                 "Refusing to start: active package manager process detected: {}",
-                active_managers.join(", ")
+                &[&active_managers.join(", ")],
             ),
             ctx.runner.log_limit,
         );
@@ -732,7 +745,7 @@ fn run_plan(
 
     if Path::new("/var/lib/pacman/db.lck").exists() {
         *ctx.transaction_in_progress.lock().unwrap() = false;
-        toasts.add_toast(adw::Toast::new("Pacman lock file present"));
+        toasts.add_toast(adw::Toast::new(t("Pacman lock file present")));
         log_drawer.set_visible(true);
         log_drawer.append_line(
             "Refusing to start because /var/lib/pacman/db.lck exists. Use the Clear Lock button in Logs.",
@@ -783,10 +796,10 @@ fn run_plan(
                 Some("Transactions complete"),
                 Some("All actions finished."),
             );
-            dialog.add_response("ok", "OK");
+            dialog.add_response("ok", t("OK"));
             dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
             dialog.present();
-            toasts.add_toast(adw::Toast::new("Transactions complete"));
+            toasts.add_toast(adw::Toast::new(t("Transactions complete")));
             return;
         }
         let cmd = cmds.remove(0);
@@ -805,9 +818,9 @@ fn run_plan(
         let start_result = match terminal_mode {
             TerminalMode::External => {
                 log_drawer.append_line(
-                    &format!(
+                    &tf(
                         "Launching command in external terminal ({})",
-                        terminal_emulator.label()
+                        &[&terminal_emulator.label()],
                     ),
                     log_limit,
                 );
@@ -821,8 +834,8 @@ fn run_plan(
             Err(err) => {
                 *in_progress.lock().unwrap() = false;
                 log_drawer.set_cancel_handler(None::<fn()>);
-                toasts.add_toast(adw::Toast::new("Failed to start command"));
-                log_drawer.append_line(&format!("Failed to start command: {err}"), log_limit);
+                toasts.add_toast(adw::Toast::new(t("Failed to start command")));
+                log_drawer.append_line(&tf("Failed to start command: {}", &[&err]), log_limit);
                 return;
             }
         };
@@ -862,7 +875,7 @@ fn run_plan(
                                     "Hint: pacman lock detected. If no active package manager is running, remove it with: sudo rm -f /var/lib/pacman/db.lck",
                                     log_limit,
                                 );
-                                toasts.add_toast(adw::Toast::new("Pacman lock file detected"));
+                                toasts.add_toast(adw::Toast::new(t("Pacman lock file detected")));
                             }
                         }
                     }
@@ -871,8 +884,9 @@ fn run_plan(
                         if code != 0 {
                             *in_progress.lock().unwrap() = false;
                             log_drawer.set_cancel_handler(None::<fn()>);
-                            toasts.add_toast(adw::Toast::new(&format!(
-                                "Command failed ({code})"
+                            toasts.add_toast(adw::Toast::new(&tf(
+                                "Command failed ({})",
+                                &[&code],
                             )));
                         } else if let Some(next) = &*next_inner.borrow() {
                             next();
@@ -954,16 +968,16 @@ fn show_prompt_dialog(
     } else {
         // Generic prompt with all options
         let entry = gtk::Entry::new();
-        entry.set_placeholder_text(Some("Enter response (e.g., y, n, 1)"));
+        entry.set_placeholder_text(Some(t("Enter response (e.g., y, n, 1)")));
         dialog.set_extra_child(Some(&entry));
 
-        dialog.add_response("n", "No");
-        dialog.add_response("ab", "Abort");
-        dialog.add_response("a", "All");
-        dialog.add_response("i", "Installed");
-        dialog.add_response("no", "NotInstalled");
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("y", "Yes");
+        dialog.add_response("n", t("No"));
+        dialog.add_response("ab", t("Abort"));
+        dialog.add_response("a", t("All"));
+        dialog.add_response("i", t("Installed"));
+        dialog.add_response("no", t("NotInstalled"));
+        dialog.add_response("cancel", t("Cancel"));
+        dialog.add_response("y", t("Yes"));
         dialog.set_response_appearance("y", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("y"));
         dialog.set_close_response("cancel");
@@ -1448,6 +1462,24 @@ fn themed_css(theme: ThemeMode) -> String {
     for (from, to) in replacements {
         css = css.replace(from, to);
     }
+    if matches!(theme, ThemeMode::System | ThemeMode::Light | ThemeMode::Dark) {
+        // The WinDoesNot palettes use the desktop accent from the shared settings.
+        let accent = crate::desktop::accent();
+        let (r, g, b) = crate::desktop::accent_rgb(&accent);
+        let foreground = crate::desktop::accent_foreground(&accent);
+        css = css
+            .replace("#fe6f2d", &accent)
+            .replace("#fe783e", &accent)
+            .replace("rgba(254, 111, 45,", &format!("rgba({r}, {g}, {b},"))
+            .replace("@define-color accent_fg_color #ffffff;", &format!("@define-color accent_fg_color {foreground};"))
+            .replace("--accent-fg-color: #ffffff;", &format!("--accent-fg-color: {foreground};"))
+            .replace("color: #f5f9ff;", &format!("color: {foreground};"));
+        css = css.replacen(
+            "            color: #ffffff;\n            box-shadow: 0 6px 18px",
+            &format!("            color: {foreground};\n            box-shadow: 0 6px 18px"),
+            1,
+        );
+    }
     css
 }
 
@@ -1490,10 +1522,25 @@ fn build_nav_row(icon_name: &str, title: &str) -> gtk::ListBoxRow {
     row
 }
 
+thread_local! {
+    static CURRENT_THEME: std::cell::Cell<ThemeMode> = std::cell::Cell::new(ThemeMode::System);
+}
+
+/// Re-applies the active theme, e.g. after the desktop accent or light/dark mode changed.
+pub(crate) fn reapply_theme() {
+    apply_theme(CURRENT_THEME.with(|current| current.get()));
+}
+
 pub(crate) fn apply_theme(theme: ThemeMode) {
+    CURRENT_THEME.with(|current| current.set(theme));
     let manager = adw::StyleManager::default();
     match theme {
-        ThemeMode::System => manager.set_color_scheme(adw::ColorScheme::Default),
+        // "System" follows the WinDoesNot desktop setting, else the global colour scheme.
+        ThemeMode::System => manager.set_color_scheme(match crate::desktop::read_prefs().dark {
+            Some(true) => adw::ColorScheme::ForceDark,
+            Some(false) => adw::ColorScheme::ForceLight,
+            None => adw::ColorScheme::Default,
+        }),
         ThemeMode::Light => manager.set_color_scheme(adw::ColorScheme::ForceLight),
         ThemeMode::Dark
         | ThemeMode::Ocean

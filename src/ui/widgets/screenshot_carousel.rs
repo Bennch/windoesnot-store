@@ -8,6 +8,7 @@ use gio;
 use libadwaita as adw;
 
 use crate::core::appstream::AppStreamClient;
+use crate::i18n::{t, tf};
 
 #[derive(Clone)]
 pub struct ScreenshotCarousel {
@@ -49,7 +50,7 @@ impl ScreenshotCarousel {
         self.pictures.borrow_mut().clear();
 
         if urls.is_empty() {
-            let label = gtk::Label::new(Some("No screenshots available"));
+            let label = gtk::Label::new(Some(t("No screenshots available")));
             label.add_css_class("dim-label");
             self.carousel.append(&label);
             self.children.borrow_mut().push(label.upcast());

@@ -7,6 +7,7 @@ use gtk::prelude::*;
 use crate::core::models::PackageSummary;
 use crate::ui::details;
 use crate::ui::{AppContext, UiHandles};
+use crate::i18n::{t, tf};
 
 #[derive(Clone)]
 pub struct InstalledPage {
@@ -31,7 +32,7 @@ impl InstalledPage {
         root.set_hexpand(true);
         root.set_vexpand(true);
 
-        let title = gtk::Label::new(Some("Installed"));
+        let title = gtk::Label::new(Some(t("Installed")));
         title.add_css_class("title-2");
         title.set_xalign(0.0);
         root.append(&title);
@@ -39,16 +40,16 @@ impl InstalledPage {
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         controls.add_css_class("page-controls");
         let search = gtk::SearchEntry::new();
-        search.set_placeholder_text(Some("Search installed packages"));
+        search.set_placeholder_text(Some(t("Search installed packages")));
         search.set_hexpand(true);
 
-        let filter = gtk::DropDown::from_strings(&["All", "Pacman", "AUR", "Flatpak"]);
+        let filter = gtk::DropDown::from_strings(&[t("All"), t("Pacman"), t("AUR"), t("Flatpak")]);
         filter.set_selected(0);
 
-        let update_all = gtk::Button::with_label("Update All");
+        let update_all = gtk::Button::with_label(t("Update All"));
         update_all.add_css_class("suggested-action");
         let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
-        refresh_button.set_tooltip_text(Some("Refresh installed"));
+        refresh_button.set_tooltip_text(Some(t("Refresh installed")));
 
         controls.append(&search);
         controls.append(&filter);
@@ -58,11 +59,11 @@ impl InstalledPage {
 
         let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         header_row.add_css_class("table-header");
-        header_row.append(&header_label("Package", true, 0));
-        header_row.append(&header_label("Version", false, 16));
-        header_row.append(&header_label("Source", false, 10));
-        header_row.append(&header_label("Status", false, 10));
-        header_row.append(&header_label("Actions", false, 12));
+        header_row.append(&header_label(t("Package"), true, 0));
+        header_row.append(&header_label(t("Version"), false, 16));
+        header_row.append(&header_label(t("Source"), false, 10));
+        header_row.append(&header_label(t("Status"), false, 10));
+        header_row.append(&header_label(t("Actions"), false, 12));
         root.append(&header_row);
 
         let list = gtk::ListBox::new();
@@ -203,16 +204,16 @@ fn build_row(pkg: PackageSummary, handles: &UiHandles, ctx: &AppContext) -> gtk:
     source_badge.set_width_chars(9);
     content.append(&source_badge);
 
-    let status_badge = gtk::Label::new(Some("Installed"));
+    let status_badge = gtk::Label::new(Some(t("Installed")));
     status_badge.add_css_class("pill-secondary");
     status_badge.set_width_chars(9);
     content.append(&status_badge);
 
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     actions.set_width_request(170);
-    let details_btn = gtk::Button::with_label("Details");
+    let details_btn = gtk::Button::with_label(t("Details"));
     details_btn.add_css_class("flat");
-    let remove_btn = gtk::Button::with_label("Remove");
+    let remove_btn = gtk::Button::with_label(t("Remove"));
     remove_btn.add_css_class("destructive-action");
     actions.append(&details_btn);
     actions.append(&remove_btn);

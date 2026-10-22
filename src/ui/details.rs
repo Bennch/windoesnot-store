@@ -12,6 +12,7 @@ use crate::core::appstream::AppStreamClient;
 use crate::core::models::{PackageDetails, PackageSource, PackageSummary};
 use crate::ui::{AppContext, UiHandles};
 use crate::ui::widgets::screenshot_carousel::ScreenshotCarousel;
+use crate::i18n::{t, tf};
 
 pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSummary) {
     let page = adw::NavigationPage::builder()
@@ -29,7 +30,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let back_btn = gtk::Button::from_icon_name("go-previous-symbolic");
     back_btn.add_css_class("flat");
     back_btn.set_halign(gtk::Align::Start);
-    back_btn.set_tooltip_text(Some("Back"));
+    back_btn.set_tooltip_text(Some(t("Back")));
 
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     let icon = gtk::Image::from_icon_name("application-x-executable");
@@ -64,11 +65,11 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let installed_state = Rc::new(RefCell::new(summary.installed));
     let action_btn = gtk::Button::with_label(if summary.installed { "Remove" } else { "Install" });
     action_btn.add_css_class("suggested-action");
-    let update_btn = gtk::Button::with_label("Update");
+    let update_btn = gtk::Button::with_label(t("Update"));
     update_btn.set_visible(summary.installed);
-    let open_home_btn = gtk::Button::with_label("Open Homepage");
+    let open_home_btn = gtk::Button::with_label(t("Open Homepage"));
     open_home_btn.set_visible(false);
-    let logs_btn = gtk::Button::with_label("View Logs");
+    let logs_btn = gtk::Button::with_label(t("View Logs"));
     button_row.append(&action_btn);
     button_row.append(&update_btn);
     button_row.append(&open_home_btn);
@@ -77,13 +78,13 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let carousel = ScreenshotCarousel::new();
 
     let details = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    let version = gtk::Label::new(Some("Version: -"));
+    let version = gtk::Label::new(Some(t("Version: -")));
     version.set_xalign(0.0);
-    let installed = gtk::Label::new(Some("Installed: no"));
+    let installed = gtk::Label::new(Some(t("Installed: no")));
     installed.set_xalign(0.0);
-    let size = gtk::Label::new(Some("Size: -"));
+    let size = gtk::Label::new(Some(t("Size: -")));
     size.set_xalign(0.0);
-    let homepage = gtk::Label::new(Some("Homepage: -"));
+    let homepage = gtk::Label::new(Some(t("Homepage: -")));
     homepage.set_xalign(0.0);
     homepage.set_selectable(true);
     homepage.set_wrap(true);
@@ -142,23 +143,23 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     icon_clone.set_icon_name(Some(icon_name));
                 }
                 summary_label_clone.set_text(&details.summary);
-                version_clone.set_text(&format!("Version: {}", details.version));
-                installed_clone.set_text(&format!(
+                version_clone.set_text(&tf("Version: {}", &[&details.version]));
+                installed_clone.set_text(&tf(
                     "Installed: {}",
-                    if details.installed { "yes" } else { "no" }
+                    &[&if details.installed { t("yes") } else { t("no") }],
                 ));
                 *installed_state_clone.borrow_mut() = details.installed;
                 action_btn_clone.set_label(if details.installed { "Remove" } else { "Install" });
                 update_btn_clone.set_visible(details.installed);
                 if let Some(size) = &details.size {
-                    size_clone.set_text(&format!("Size: {size}"));
+                    size_clone.set_text(&tf("Size: {}", &[size]));
                 }
                 if let Some(home) = details.home.clone() {
-                    homepage_clone.set_text(&format!("Homepage: {home}"));
+                    homepage_clone.set_text(&tf("Homepage: {}", &[&home]));
                     *home_url_clone.borrow_mut() = Some(home);
                     open_home_btn_clone.set_visible(true);
                 } else {
-                    homepage_clone.set_text("Homepage: -");
+                    homepage_clone.set_text(t("Homepage: -"));
                     *home_url_clone.borrow_mut() = None;
                     open_home_btn_clone.set_visible(false);
                 }
@@ -197,7 +198,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     open_home_btn.connect_clicked(move |_| {
         if let Some(url) = home_url.borrow().clone() {
             if gio::AppInfo::launch_default_for_uri(&url, None::<&gio::AppLaunchContext>).is_err() {
-                toasts.add_toast(adw::Toast::new("Failed to open homepage"));
+                toasts.add_toast(adw::Toast::new(t("Failed to open homepage")));
             }
         }
     });

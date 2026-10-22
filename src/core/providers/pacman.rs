@@ -30,28 +30,17 @@ impl Pacman {
     }
 
     fn parse_search_output(output: &str) -> Vec<PackageSummary> {
-        let mut results = Vec::new();
-        let mut lines = output.lines();
-        while let Some(line) = lines.next() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let header = line.trim();
-            let summary = lines.next().unwrap_or("").trim().to_string();
-            let mut parts = header.split_whitespace();
-            let repo_pkg = parts.next().unwrap_or("");
-            let version = parts.next().unwrap_or("").to_string();
-            let name = repo_pkg.split('/').nth(1).unwrap_or(repo_pkg).to_string();
-            results.push(PackageSummary {
-                name,
-                summary,
-                version,
+        crate::core::providers::parse_search_hits(output)
+            .into_iter()
+            .map(|hit| PackageSummary {
+                name: hit.name,
+                summary: hit.summary,
+                version: hit.version,
                 source: PackageSource::Repo,
                 installed: false,
                 origin: None,
-            });
-        }
-        results
+            })
+            .collect()
     }
 
     fn parse_info(output: &str, source: PackageSource) -> PackageDetails {

@@ -7,6 +7,7 @@ use glib::ControlFlow;
 use crate::core::cache::find_logo_path;
 use crate::ui::widgets::card;
 use crate::ui::AppContext;
+use crate::i18n::{t, tf};
 
 #[derive(Clone)]
 pub struct HomePage {
@@ -30,14 +31,14 @@ impl HomePage {
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let logo = logo_image(64);
-        let title = gtk::Label::new(Some("WinDoesNot Store"));
+        let title = gtk::Label::new(Some(t("WinDoesNot Store")));
         title.add_css_class("title-1");
         title.set_xalign(0.0);
         header.append(&logo);
         header.append(&title);
         root.append(&header);
 
-        let summary_label = gtk::Label::new(Some("Loading package summary..."));
+        let summary_label = gtk::Label::new(Some(t("Loading package summary...")));
         summary_label.set_xalign(0.0);
         summary_label.set_wrap(true);
         summary_label.add_css_class("dim-label");
@@ -45,24 +46,24 @@ impl HomePage {
 
         let quick_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         quick_actions.add_css_class("page-controls");
-        let open_search_btn = gtk::Button::with_label("Browse Packages");
-        let open_updates_btn = gtk::Button::with_label("Open Updates");
+        let open_search_btn = gtk::Button::with_label(t("Browse Packages"));
+        let open_updates_btn = gtk::Button::with_label(t("Open Updates"));
         open_updates_btn.add_css_class("suggested-action");
-        let open_installed_btn = gtk::Button::with_label("View Installed");
+        let open_installed_btn = gtk::Button::with_label(t("View Installed"));
         quick_actions.append(&open_search_btn);
         quick_actions.append(&open_updates_btn);
         quick_actions.append(&open_installed_btn);
         root.append(&quick_actions);
 
         let category_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        for label in ["Graphics", "Development", "Media", "Games", "Utilities"] {
+        for label in [t("Graphics"), t("Development"), t("Media"), t("Games"), t("Utilities")] {
             let chip = gtk::Label::new(Some(label));
             chip.add_css_class("pill");
             category_row.append(&chip);
         }
         root.append(&category_row);
 
-        let title = gtk::Label::new(Some("Featured"));
+        let title = gtk::Label::new(Some(t("Featured")));
         title.add_css_class("title-2");
         title.set_xalign(0.0);
         root.append(&title);
@@ -77,7 +78,7 @@ impl HomePage {
         featured.set_selection_mode(gtk::SelectionMode::None);
         root.append(&featured);
 
-        let popular = gtk::Label::new(Some("Popular"));
+        let popular = gtk::Label::new(Some(t("Popular")));
         popular.add_css_class("title-2");
         popular.set_xalign(0.0);
         root.append(&popular);
@@ -95,8 +96,8 @@ impl HomePage {
         // Lightweight placeholders so the page doesn't look empty.
         let placeholder = card::build_card(
             &crate::core::models::PackageSummary {
-                name: "Discover Apps".to_string(),
-                summary: "Search and install applications from repo and AUR."
+                name: t("Discover Apps").to_string(),
+                summary: t("Search and install applications from repo and AUR.")
                     .to_string(),
                 version: String::from("-"),
                 source: crate::core::models::PackageSource::Repo,
@@ -137,8 +138,9 @@ fn refresh_summary(summary: gtk::Label, ctx: AppContext) {
 
     glib::idle_add_local(move || match rx.try_recv() {
         Ok((pacman_count, flatpak_count)) => {
-            summary.set_text(&format!(
-                "Installed packages: {pacman_count} (Pacman/AUR), {flatpak_count} Flatpak apps"
+            summary.set_text(&tf(
+                "Installed packages: {} (Pacman/AUR), {} Flatpak apps",
+                &[&pacman_count, &flatpak_count],
             ));
             ControlFlow::Break
         }
