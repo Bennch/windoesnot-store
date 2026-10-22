@@ -292,15 +292,16 @@ fn validate_flag_value(flag: &str, value: &str) -> Result<()> {
             }
         }
         "--config" => {
-            if !value.starts_with("/etc/") && !value.starts_with("/usr/") {
+            if value != "/etc/pacman.conf" {
                 return Err(anyhow!("unsafe --config path: {value}"));
             }
         }
+        // pacman runs as root here: caller-chosen roots, databases, caches, keyrings
+        // or hook directories would let a caller run code as root. The store and
+        // AUR helpers never need them.
         "--dbpath" | "--root" | "--sysroot" | "--cachedir" | "--logfile" | "--hookdir"
-        | "--gpgdir" => {
-            if !value.starts_with('/') {
-                return Err(anyhow!("path for {flag} must be absolute"));
-            }
+        | "--gpgdir" | "--arch" | "--overwrite" => {
+            return Err(anyhow!("flag not allowed: {flag}"));
         }
         "--ignore" | "--ignore-group" => {
             // pacman accepts comma-separated package / group names. Reuse the
@@ -316,19 +317,6 @@ fn validate_flag_value(flag: &str, value: &str) -> Result<()> {
                 {
                     return Err(anyhow!("invalid value for {flag}: {token}"));
                 }
-            }
-        }
-        "--arch" => {
-            if value.len() > 16
-                || !value.chars().all(|c| c.is_ascii_alphanumeric() || "_-".contains(c))
-            {
-                return Err(anyhow!("invalid value for --arch: {value}"));
-            }
-        }
-        "--overwrite" => {
-            // pacman accepts glob-like patterns here, allow broad characters.
-            if value.len() > 512 {
-                return Err(anyhow!("invalid value for --overwrite"));
             }
         }
         _ => {}
@@ -424,6 +412,16 @@ mod tests {
         assert!(prepare(&["-Syu", "--", "--nodeps"]).is_err());
         assert!(prepare(&["-Syu", "firefox", "--needed"]).is_err());
         assert!(prepare(&["-Syu", "firefox;reboot"]).is_err());
+    }
+
+    #[test]
+    fn root_relocation_and_hook_flags_are_rejected() {
+        for flag in ["--hookdir", "--root", "--sysroot", "--dbpath", "--cachedir", "--gpgdir", "--logfile", "--arch", "--overwrite"] {
+            assert!(prepare(&["-Syu", flag, "/tmp/x", "firefox"]).is_err(), "accepted {flag}");
+            assert!(prepare(&["-Syu", &format!("{flag}=/tmp/x"), "firefox"]).is_err(), "accepted {flag}=");
+        }
+        assert!(prepare(&["-Syu", "--config", "/etc/pacman.conf", "firefox"]).is_ok());
+        assert!(prepare(&["-Syu", "--config", "/etc/pacman.d/evil.conf", "firefox"]).is_err());
     }
 
     #[test]
