@@ -108,12 +108,16 @@ impl PacmanProvider for Pacman {
             return Ok(Vec::new());
         }
         args.extend(terms);
+        // Search the user's copy of the sync databases, never a fresh -Sy of the system ones.
+        let dbpath = crate::core::syncdb::query_dbpath();
+        args.extend(["--dbpath".to_string(), dbpath.to_string_lossy().to_string()]);
         let output = Self::run_capture(args)?;
         Ok(Self::parse_search_output(&output))
     }
 
     fn info_repo(&self, name: &str) -> Result<PackageDetails> {
-        let output = Self::run_capture(["-Si", name])?;
+        let dbpath = crate::core::syncdb::query_dbpath();
+        let output = Self::run_capture([std::ffi::OsStr::new("-Si"), std::ffi::OsStr::new("--dbpath"), dbpath.as_os_str(), std::ffi::OsStr::new(name)])?;
         Ok(Self::parse_info(&output, PackageSource::Repo))
     }
 

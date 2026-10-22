@@ -3,6 +3,7 @@ pub mod cache;
 pub mod icons;
 pub mod models;
 pub mod providers;
+pub mod syncdb;
 pub mod runner;
 pub mod transactions;
 

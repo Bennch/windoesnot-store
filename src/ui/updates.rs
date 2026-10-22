@@ -143,6 +143,10 @@ impl UpdatesPage {
             let ctx = ctx.clone();
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
+                // An explicit check refreshes the search copy regardless of its age.
+                if let Err(err) = crate::core::syncdb::refresh_now() {
+                    eprintln!("windoesnot-store: update check without fresh database: {err}");
+                }
                 let items = collect_updates(&ctx);
                 let _ = tx.send(items);
             });
@@ -373,8 +377,11 @@ fn header_label(text: &str, expand: bool, width_chars: i32) -> gtk::Label {
 }
 
 fn collect_pacman_updates() -> Vec<(TransactionAction, String)> {
+    // Compare against the user's sync copy, like checkupdates; -Qu on the system
+    // databases would only see what the last full upgrade downloaded.
     let output = Command::new("pacman")
-        .args(["-Qu"])
+        .args(["-Qu", "--dbpath"])
+        .arg(crate::core::syncdb::query_dbpath())
         .env("LC_ALL", "C")
         .output()
         .ok()
