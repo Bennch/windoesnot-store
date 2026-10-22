@@ -36,6 +36,10 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.1.0" date="2026-10-22"/>
+    <release version="0.2.0" date="2026-10-22">
+      <description>
+        <p>First WinDoesNot release: home page, catalogue icons, safe updates, German and English.</p>
+      </description>
+    </release>
   </releases>
 </component>
