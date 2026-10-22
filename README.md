@@ -17,7 +17,7 @@ Flathub, and system updates that stay safe for a Hyprland desktop.
 |---|---|
 | ![Search results](docs/screenshots/search.png) | ![Home page in light mode](docs/screenshots/home-light.png) |
 
-> Status: early preview (0.2.0, the first WinDoesNot release after Aurora 0.1.14). It is developed for WinDoesNot and tested
+> Status: early preview (0.3.0; numbering continues after Aurora 0.1.14). It is developed for WinDoesNot and tested
 > there; on other Arch-based systems it runs, but the desktop integration
 > (accent colour, light/dark, language) only applies with WinDoesNot.
 
@@ -67,7 +67,7 @@ Der App-Store des [WinDoesNot](https://windoesnot.me)-Desktops: kuratierte
 Empfehlungen, Suche in den Arch-/CachyOS-Paketquellen, im AUR und auf Flathub
 sowie Systemupdates, die für einen Hyprland-Desktop sicher bleiben.
 
-> Stand: frühe Vorschau (0.2.0, das erste WinDoesNot-Release nach Aurora 0.1.14). Entwickelt und getestet für WinDoesNot; auf
+> Stand: frühe Vorschau (0.3.0; die Nummerierung setzt nach Aurora 0.1.14 fort). Entwickelt und getestet für WinDoesNot; auf
 > anderen Arch-basierten Systemen läuft der Store ebenfalls, die
 > Desktop-Anbindung (Akzentfarbe, Hell/Dunkel, Sprache) greift aber nur unter
 > WinDoesNot.

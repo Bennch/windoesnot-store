@@ -36,6 +36,11 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-10-22">
+      <description>
+        <p>App installs run as one full system upgrade, the installed AUR helper is detected, search uses its own copy of the package databases, and the root helper rejects options that relocate pacman.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-22">
       <description>
         <p>First WinDoesNot release: home page, catalogue icons, safe updates, German and English.</p>
