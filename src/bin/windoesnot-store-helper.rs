@@ -43,11 +43,7 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
         args.remove(0);
     }
 
-    // yay/paru may include a standalone end-of-options separator before package targets.
-    // pacman does not need it for normal package names, so drop it to simplify validation.
-    args.retain(|arg| arg != "--");
-
-    validate_pacman(&args)?;
+    let args = prepare_pacman_args(args)?;
 
     let status = Command::new("pacman")
         .args(&args)
@@ -55,6 +51,16 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
         .status()?;
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn prepare_pacman_args(mut args: Vec<String>) -> Result<Vec<String>> {
+    // AUR helpers can request native dependencies through plain -S. Enforce
+    // the same full-upgrade contract there, including callers older than the UI.
+    if matches!(args.first().map(String::as_str), Some("-S" | "--sync")) {
+        args[0] = "-Syu".to_string();
+    }
+    validate_pacman(&args)?;
+    Ok(args)
 }
 
 fn clear_pacman_lock() -> Result<()> {
@@ -213,10 +219,6 @@ fn validate_pacman(raw_args: &[String]) -> Result<()> {
         return Err(anyhow!("no package files supplied"));
     }
 
-    if op == "-Syu" && !pkgs.is_empty() {
-        return Err(anyhow!("-Syu does not accept packages"));
-    }
-
     if pkgs.len() > 200 {
         return Err(anyhow!("too many packages"));
     }
@@ -232,8 +234,6 @@ fn is_allowed_flag(flag: &str) -> bool {
             | "--noprogressbar"
             | "--asdeps"
             | "--asexplicit"
-            | "--nocheck"
-            | "--nodeps"
             | "--nosave"
             | "-n"
             | "--downloadonly"
@@ -244,7 +244,6 @@ fn is_allowed_flag(flag: &str) -> bool {
             | "-v"
             // short forms of pacman flags that are safe within the
             // already-locked-down op whitelist (-S / -Syu / -R / -U / -D)
-            | "-d" // --nodeps          (-R / -S)
             | "-c" // --clean           (-S / -R)
             | "-u" // --upgrades / --unneeded (-S / -R)
             | "-s" // --search / --recursive  (-S / -R)
@@ -264,8 +263,6 @@ fn flag_takes_value(flag: &str) -> bool {
             | "--dbpath"
             | "--root"
             | "--sysroot"
-            | "--ignore"
-            | "--ignore-group"
             | "--cachedir"
             | "--logfile"
             | "--hookdir"
@@ -382,4 +379,56 @@ fn is_safe_pkgfile(path: &str) -> bool {
         ".pkg.tar",
     ];
     allowed_exts.iter().any(|ext| name.ends_with(ext))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prepare(args: &[&str]) -> Result<Vec<String>> {
+        prepare_pacman_args(args.iter().map(|arg| arg.to_string()).collect())
+    }
+
+    #[test]
+    fn full_upgrade_accepts_package_targets() {
+        assert!(prepare(&["-Syu", "--needed", "--noconfirm", "firefox", "vlc"]).is_ok());
+        assert!(prepare(&["-Syu", "--noconfirm"]).is_ok());
+    }
+
+    #[test]
+    fn legacy_and_aur_dependency_installs_are_upgraded_at_helper_boundary() {
+        for op in ["-S", "--sync"] {
+            let args = prepare(&[op, "--asdeps", "--needed", "gtk4"]).unwrap();
+            assert_eq!(args[0], "-Syu");
+            assert_eq!(args.last().unwrap(), "gtk4");
+        }
+    }
+
+    #[test]
+    fn refresh_without_full_upgrade_is_not_an_allowed_operation() {
+        assert!(prepare(&["-Sy", "firefox"]).is_err());
+        assert!(prepare(&["-Syy", "firefox"]).is_err());
+    }
+
+    #[test]
+    fn dependency_and_package_ignore_bypasses_are_rejected() {
+        for flag in ["--nodeps", "-d", "-dd", "--nocheck", "--ignore=hyprland", "--ignore-group=base", "--assume-installed=hyprland"] {
+            assert!(prepare(&["-Syu", flag, "firefox"]).is_err(), "accepted {flag}");
+        }
+        assert!(prepare(&["-Syu", "--ignore", "hyprland", "firefox"]).is_err());
+    }
+
+    #[test]
+    fn end_of_options_and_invalid_targets_cannot_inject_options() {
+        assert!(prepare(&["-Syu", "--", "firefox"]).is_ok());
+        assert!(prepare(&["-Syu", "--", "--nodeps"]).is_err());
+        assert!(prepare(&["-Syu", "firefox", "--needed"]).is_err());
+        assert!(prepare(&["-Syu", "firefox;reboot"]).is_err());
+    }
+
+    #[test]
+    fn normal_remove_and_dependency_marking_still_work() {
+        assert!(prepare(&["-Rns", "--noconfirm", "vlc"]).is_ok());
+        assert!(prepare(&["-D", "--asdeps", "gtk4"]).is_ok());
+    }
 }

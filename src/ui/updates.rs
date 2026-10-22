@@ -404,6 +404,7 @@ fn collect_aur_updates(ctx: &AppContext) -> Vec<(TransactionAction, String)> {
         Ok(settings) => settings.aur_helper,
         Err(_) => AurHelperKind::Yay,
     };
+    let Some(helper) = helper.installed() else { return Vec::new(); };
     let output = Command::new(helper.as_str())
         .args(["-Qua"])
         .env("LC_ALL", "C")

@@ -27,12 +27,14 @@ pub fn config_dir() -> PathBuf {
 
 pub fn load_settings() -> Settings {
     let path = config_dir().join("settings.json");
-    if let Ok(data) = fs::read_to_string(path) {
-        if let Ok(settings) = serde_json::from_str(&data) {
-            return settings;
-        }
+    let mut settings: Settings = fs::read_to_string(path)
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok())
+        .unwrap_or_default();
+    if let Some(helper) = settings.aur_helper.installed() {
+        settings.aur_helper = helper;
     }
-    Settings::default()
+    settings
 }
 
 pub fn save_settings(settings: &Settings) -> Result<()> {

@@ -81,6 +81,8 @@ const DE: &[(&str, &str)] = &[
     ("No updates match selected filters", "Keine Updates für die gewählten Filter"),
     ("{} updates shown ({} total)", "{} Updates angezeigt ({} insgesamt)"),
     // Queue and transactions
+    ("No AUR helper installed. Install paru or yay to use AUR.", "Kein AUR-Helfer installiert. Installiere paru oder yay, um das AUR zu nutzen."),
+    ("Installing native packages also updates the whole system. Matching WinDoesNot components are required.", "Beim Installieren nativer Pakete wird auch das gesamte System aktualisiert. Dafür werden passende WinDoesNot-Komponenten benötigt."),
     ("Queued {} update(s), skipped {} duplicates", "{} Update(s) eingereiht, {} doppelte übersprungen"),
     ("OK", "OK"),
     ("Cancel", "Abbrechen"),

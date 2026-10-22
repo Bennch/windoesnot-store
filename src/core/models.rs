@@ -86,6 +86,20 @@ pub enum AurHelperKind {
 }
 
 impl AurHelperKind {
+    /// Prefer the saved choice, then fall back to the helper actually installed.
+    /// No global environment mutation: availability can be injected in tests.
+    pub fn resolve_with(self, available: impl Fn(&str) -> bool) -> Option<Self> {
+        let other = match self {
+            Self::Yay => Self::Paru,
+            Self::Paru => Self::Yay,
+        };
+        [self, other].into_iter().find(|helper| available(helper.as_str()))
+    }
+
+    pub fn installed(self) -> Option<Self> {
+        self.resolve_with(crate::core::cache::command_exists)
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             AurHelperKind::Yay => "yay",

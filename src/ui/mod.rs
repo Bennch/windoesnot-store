@@ -25,7 +25,7 @@ use crate::core::providers::flatpak::Flatpak;
 use crate::core::providers::pacman::Pacman;
 use crate::core::providers::{AurProvider, FlatpakProvider, PacmanProvider};
 use crate::core::runner::{CommandRunner, LogEvent, RunningHandle};
-use crate::core::transactions::{plan_transactions, TransactionPlan};
+use crate::core::transactions::{all_upgrade_actions, plan_transactions, TransactionPlan};
 use crate::i18n::{t, tf};
 
 pub mod details;
@@ -163,25 +163,12 @@ impl QueueController {
     }
 
     pub fn add_upgrade_all(&self) {
+        let aur_available = self.ctx.settings.lock().unwrap().aur_helper.installed().is_some();
+        let flatpak_available = crate::core::cache::command_exists("flatpak");
         let mut queue = self.ctx.queue.lock().unwrap();
-        queue.push(TransactionAction {
-            name: String::from("system"),
-            source: PackageSource::Repo,
-            kind: ActionKind::Upgrade,
-            origin: None,
-        });
-        queue.push(TransactionAction {
-            name: String::from("aur"),
-            source: PackageSource::Aur,
-            kind: ActionKind::Upgrade,
-            origin: None,
-        });
-        queue.push(TransactionAction {
-            name: String::from("flatpak"),
-            source: PackageSource::Flatpak,
-            kind: ActionKind::Upgrade,
-            origin: None,
-        });
+        for action in all_upgrade_actions(aur_available, flatpak_available) {
+            queue.push(action);
+        }
         drop(queue);
         self.update_label();
         self.toast("All updates queued");
@@ -220,7 +207,7 @@ impl QueueController {
         let dialog = adw::MessageDialog::new(
             Some(&self.parent),
             Some("Review Transactions"),
-            Some("Confirm before executing."),
+            Some(t("Installing native packages also updates the whole system. Matching WinDoesNot components are required.")),
         );
         dialog.set_extra_child(Some(&scroller));
         dialog.add_response("cancel", t("Cancel"));
@@ -235,7 +222,14 @@ impl QueueController {
 
         dialog.connect_response(None, move |d: &adw::MessageDialog, resp| {
             if resp == "execute" {
-                let plan = plan_transactions(&queue, &ctx.settings.lock().unwrap());
+                let plan = match plan_transactions(&queue, &ctx.settings.lock().unwrap()) {
+                    Ok(plan) => plan,
+                    Err(err) => {
+                        toasts.add_toast(adw::Toast::new(&err.to_string()));
+                        d.close();
+                        return;
+                    }
+                };
                 let started = run_plan(plan, &ctx, &log_drawer, &parent, &toasts);
                 if started {
                     ctx.queue.lock().unwrap().clear();

@@ -122,6 +122,9 @@ impl SettingsPage {
             AurHelperKind::Yay => self.helper_row.set_selected(0),
             AurHelperKind::Paru => self.helper_row.set_selected(1),
         }
+        if settings.aur_helper.installed().is_none() {
+            self.helper_row.set_subtitle(t("No AUR helper installed. Install paru or yay to use AUR."));
+        }
         self.noconfirm_row.set_active(settings.allow_noconfirm);
 
         let ctx_clone = ctx.clone();

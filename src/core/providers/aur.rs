@@ -17,8 +17,10 @@ impl Aur {
         Self { settings }
     }
 
-    fn helper_bin(&self) -> String {
-        self.settings.lock().unwrap().aur_helper.as_str().to_string()
+    fn helper_bin(&self) -> Result<String> {
+        self.settings.lock().unwrap().aur_helper.installed()
+            .map(|helper| helper.as_str().to_string())
+            .ok_or_else(|| anyhow!(crate::i18n::t("No AUR helper installed. Install paru or yay to use AUR.")))
     }
 
     fn run_capture<I, S>(&self, args: I) -> Result<String>
@@ -26,7 +28,7 @@ impl Aur {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let helper = self.helper_bin();
+        let helper = self.helper_bin()?;
         let output = Command::new(&helper)
             .args(args)
             .env("LC_ALL", "C")
