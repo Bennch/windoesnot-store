@@ -34,41 +34,31 @@ jobs:
       - name: Create release bundle
         run: |
           set -euxo pipefail
-
-          bundle_root="dist/aurora-linux-x86_64"
+          bundle_root="dist/windoesnot-store-linux-x86_64"
           rm -rf "$bundle_root"
-
-          install -Dm755 target/release/aurora "$bundle_root/aurora"
-          install -Dm755 target/release/aurora-helper "$bundle_root/aurora-helper"
-
-          install -Dm644 resources/io.github.ahmoodio.aurora.desktop \
-            "$bundle_root/resources/io.github.ahmoodio.aurora.desktop"
-          install -Dm644 resources/io.github.ahmoodio.aurora.metainfo.xml \
-            "$bundle_root/resources/io.github.ahmoodio.aurora.metainfo.xml"
-          install -Dm644 resources/io.github.ahmoodio.aurora.policy \
-            "$bundle_root/resources/io.github.ahmoodio.aurora.policy"
-
-          install -Dm644 assets/icons/hicolor/256x256/apps/io.github.ahmoodio.aurora.png \
-            "$bundle_root/assets/icons/hicolor/256x256/apps/io.github.ahmoodio.aurora.png"
-          install -Dm644 assets/icons/hicolor/scalable/apps/io.github.ahmoodio.aurora.png \
-            "$bundle_root/assets/icons/hicolor/scalable/apps/io.github.ahmoodio.aurora.png"
-
-          tar -C dist -czf dist/aurora-linux-x86_64.tar.gz aurora-linux-x86_64
-          sha256sum dist/aurora-linux-x86_64.tar.gz > dist/aurora-linux-x86_64.tar.gz.sha256
+          install -Dm755 target/release/windoesnot-store "$bundle_root/windoesnot-store"
+          install -Dm755 target/release/windoesnot-store-helper "$bundle_root/windoesnot-store-helper"
+          install -Dm644 resources/me.windoesnot.Store.desktop "$bundle_root/resources/me.windoesnot.Store.desktop"
+          install -Dm644 resources/me.windoesnot.Store.metainfo.xml "$bundle_root/resources/me.windoesnot.Store.metainfo.xml"
+          install -Dm644 resources/me.windoesnot.Store.policy "$bundle_root/resources/me.windoesnot.Store.policy"
+          install -Dm644 LICENSE "$bundle_root/LICENSE"
+          install -Dm644 README.md "$bundle_root/README.md"
+          tar -C dist -czf dist/windoesnot-store-linux-x86_64.tar.gz windoesnot-store-linux-x86_64
+          sha256sum dist/windoesnot-store-linux-x86_64.tar.gz > dist/windoesnot-store-linux-x86_64.tar.gz.sha256
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aurora-linux-x86_64
+          name: windoesnot-store-linux-x86_64
           path: |
-            dist/aurora-linux-x86_64.tar.gz
-            dist/aurora-linux-x86_64.tar.gz.sha256
+            dist/windoesnot-store-linux-x86_64.tar.gz
+            dist/windoesnot-store-linux-x86_64.tar.gz.sha256
 
       - name: Publish release assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/aurora-linux-x86_64.tar.gz
-            dist/aurora-linux-x86_64.tar.gz.sha256
-          generate_release_notes: true
+            dist/windoesnot-store-linux-x86_64.tar.gz
+            dist/windoesnot-store-linux-x86_64.tar.gz.sha256
+          generate_release_notes: false
