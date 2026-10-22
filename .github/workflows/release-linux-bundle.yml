@@ -44,7 +44,8 @@ jobs:
           install -Dm644 LICENSE "$bundle_root/LICENSE"
           install -Dm644 README.md "$bundle_root/README.md"
           tar -C dist -czf dist/windoesnot-store-linux-x86_64.tar.gz windoesnot-store-linux-x86_64
-          sha256sum dist/windoesnot-store-linux-x86_64.tar.gz > dist/windoesnot-store-linux-x86_64.tar.gz.sha256
+          # Relative name, so `sha256sum -c` works next to the downloaded archive.
+          (cd dist && sha256sum windoesnot-store-linux-x86_64.tar.gz > windoesnot-store-linux-x86_64.tar.gz.sha256)
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
