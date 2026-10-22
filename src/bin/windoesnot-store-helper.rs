@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("aurora-helper error: {err}");
+        eprintln!("windoesnot-store-helper error: {err}");
         std::process::exit(1);
     }
 }
@@ -38,7 +38,7 @@ fn ensure_root() -> Result<()> {
 
 fn run_pacman(mut args: Vec<String>) -> Result<()> {
     // Some helper invocations include "pacman" twice:
-    // aurora-helper pacman pacman -S ...
+    // windoesnot-store-helper pacman pacman -S ...
     if matches!(args.first(), Some(arg) if arg == "pacman") {
         args.remove(0);
     }

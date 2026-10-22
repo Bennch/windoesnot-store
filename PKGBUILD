@@ -1,16 +1,21 @@
-# Maintainer: ahmoodio <ahmoodio at github dot com>
+# Maintainer: WinDoesNot contributors <https://github.com/Bennch/windoesnot-store>
+# Based on the Aurora PKGBUILD by ahmoodio.
 
-pkgname=aurora
+pkgname=windoesnot-store
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="A modern, Wayland-first GUI for Arch Linux package management"
+pkgdesc="App store of the WinDoesNot desktop (GTK4/libadwaita, pacman, AUR, Flatpak)"
 arch=('x86_64')
-url="https://github.com/ahmoodio/aurora"
+url="https://github.com/Bennch/windoesnot-store"
 license=('MIT')
-depends=('gtk4' 'libadwaita' 'polkit')
+depends=('gtk4' 'libadwaita' 'polkit' 'pacman' 'appstream')
+optdepends=('archlinux-appstream-data: icons for repository apps that are not installed'
+            'flatpak: Flathub apps'
+            'paru: AUR packages'
+            'yay: AUR packages')
 makedepends=('cargo' 'clang' 'perl')
-install=aurora.install
-source=("$url/archive/v$pkgver.tar.gz")
+install=windoesnot-store.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {
@@ -23,21 +28,20 @@ build() {
   cargo build --release --locked --bins
 }
 
+check() {
+  cd "$pkgname-$pkgver"
+  cargo test --release --locked
+}
+
 package() {
   cd "$pkgname-$pkgver"
-
-  install -Dm755 target/release/aurora "$pkgdir/usr/bin/aurora"
-  install -Dm755 target/release/aurora-helper "$pkgdir/usr/bin/aurora-helper"
-
-  install -Dm644 resources/io.github.ahmoodio.aurora.desktop \
-    "$pkgdir/usr/share/applications/io.github.ahmoodio.aurora.desktop"
-  install -Dm644 resources/io.github.ahmoodio.aurora.metainfo.xml \
-    "$pkgdir/usr/share/metainfo/io.github.ahmoodio.aurora.metainfo.xml"
-  install -Dm644 resources/io.github.ahmoodio.aurora.policy \
-    "$pkgdir/usr/share/polkit-1/actions/io.github.ahmoodio.aurora.policy"
-
-  install -Dm644 assets/icons/hicolor/256x256/apps/io.github.ahmoodio.aurora.png \
-    "$pkgdir/usr/share/icons/hicolor/256x256/apps/io.github.ahmoodio.aurora.png"
-  install -Dm644 assets/icons/hicolor/scalable/apps/io.github.ahmoodio.aurora.png \
-    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.ahmoodio.aurora.png"
+  install -Dm755 target/release/windoesnot-store "$pkgdir/usr/bin/windoesnot-store"
+  install -Dm755 target/release/windoesnot-store-helper "$pkgdir/usr/bin/windoesnot-store-helper"
+  install -Dm644 resources/me.windoesnot.Store.desktop \
+    "$pkgdir/usr/share/applications/me.windoesnot.Store.desktop"
+  install -Dm644 resources/me.windoesnot.Store.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/me.windoesnot.Store.metainfo.xml"
+  install -Dm644 resources/me.windoesnot.Store.policy \
+    "$pkgdir/usr/share/polkit-1/actions/me.windoesnot.Store.policy"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

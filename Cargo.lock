@@ -15,25 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
-name = "aurora"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "directories",
- "gio",
- "glib",
- "gtk4",
- "libadwaita",
- "libc",
- "once_cell",
- "serde",
- "serde_json",
- "thiserror",
- "ureq",
- "url",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1190,6 +1171,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "windoesnot-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "gio",
+ "glib",
+ "gtk4",
+ "libadwaita",
+ "libc",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "ureq",
+ "url",
 ]
 
 [[package]]

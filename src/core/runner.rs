@@ -296,12 +296,12 @@ impl CommandRunner {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let exit_file = std::env::temp_dir().join(format!("aurora-exit-{stamp}.code"));
+        let exit_file = std::env::temp_dir().join(format!("windoesnot-store-exit-{stamp}.code"));
         let exit_file_text = exit_file.to_string_lossy().to_string();
 
         let script = format!(
             "printf '%s\\n' {trace}\n{command}\ncode=$?\nprintf '%s\\n' \"$code\" > {exit_file}\nexit \"$code\"\n",
-            trace = shell_quote(&format!("[aurora] Running: {display_line}")),
+            trace = shell_quote(&format!("[windoesnot-store] Running: {display_line}")),
             command = shell_command,
             exit_file = shell_quote(&exit_file_text),
         );

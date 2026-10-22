@@ -89,7 +89,7 @@ fn aur_command(helper: AurHelperKind, op: &str, pkg: &str, noconfirm: &[String],
         args.push(pkg.to_string());
     }
 
-    // Best-effort: ask yay/paru to use pkexec + aurora-helper for pacman calls.
+    // Best-effort: ask yay/paru to use pkexec + windoesnot-store-helper for pacman calls.
     // This respects the "privileged ops via helper" requirement when supported by the helper.
     args.push("--sudo".to_string());
     args.push("pkexec".to_string());
@@ -103,11 +103,11 @@ fn helper_path() -> String {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let mut candidate = PathBuf::from(dir);
-            candidate.push("aurora-helper");
+            candidate.push("windoesnot-store-helper");
             if candidate.exists() {
                 return candidate.to_string_lossy().to_string();
             }
         }
     }
-    "/usr/bin/aurora-helper".to_string()
+    "/usr/bin/windoesnot-store-helper".to_string()
 }

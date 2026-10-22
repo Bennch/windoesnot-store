@@ -10,7 +10,7 @@ use directories::ProjectDirs;
 use crate::core::models::Settings;
 
 pub fn project_dirs() -> ProjectDirs {
-    ProjectDirs::from("io", "github.ahmoodio", "Aurora").expect("Project dirs")
+    ProjectDirs::from("me", "windoesnot", "windoesnot-store").expect("Project dirs")
 }
 
 pub fn cache_dir() -> PathBuf {

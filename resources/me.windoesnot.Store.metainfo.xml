@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>me.windoesnot.Store</id>
+  <name>WinDoesNot Store</name>
+  <summary>Find, install and update apps</summary>
+  <summary xml:lang="de">Apps finden, installieren und aktualisieren</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="me.windoesnot">
+    <name>WinDoesNot contributors</name>
+  </developer>
+  <url type="homepage">https://windoesnot.me</url>
+  <url type="vcs-browser">https://github.com/Bennch/windoesnot-store</url>
+  <url type="bugtracker">https://github.com/Bennch/windoesnot-store/issues</url>
+  <launchable type="desktop-id">me.windoesnot.Store.desktop</launchable>
+  <description>
+    <p>
+      The app store of the WinDoesNot desktop: curated recommendations, search
+      across the Arch/CachyOS repositories, the AUR and Flathub, and safe system
+      updates that never upgrade single packages on their own.
+    </p>
+    <p xml:lang="de">
+      Der App-Store des WinDoesNot-Desktops: kuratierte Empfehlungen, Suche in den
+      Arch-/CachyOS-Paketquellen, im AUR und auf Flathub sowie sichere
+      Systemupdates, die nie einzelne Pakete für sich aktualisieren.
+    </p>
+    <p>Based on Aurora by ahmoodio.</p>
+  </description>
+  <provides>
+    <binary>windoesnot-store</binary>
+  </provides>
+  <icon type="stock">system-software-install</icon>
+  <categories>
+    <category>System</category>
+    <category>PackageManager</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-22"/>
+  </releases>
+</component>

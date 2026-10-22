@@ -1,8 +1,8 @@
 [package]
-name = "aurora"
+name = "windoesnot-store"
 version = "0.1.0"
 edition = "2021"
-default-run = "aurora"
+default-run = "windoesnot-store"
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.8", features = ["v4_10"] }

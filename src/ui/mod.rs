@@ -966,7 +966,7 @@ fn run_plan(
 
 fn active_package_managers() -> Result<Vec<String>, String> {
     let mut active = Vec::new();
-    let names = ["pacman", "yay", "paru", "pamac", "pkcon", "packagekitd", "aurora-helper"];
+    let names = ["pacman", "yay", "paru", "pamac", "pkcon", "packagekitd", "windoesnot-store-helper"];
     for name in names {
         match Command::new("pgrep").arg("-x").arg(name).status() {
             Ok(status) if status.success() => active.push(name.to_string()),

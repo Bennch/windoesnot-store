@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: pacman -Syu --noconfirm --needed git gtk4 libadwaita rust clang pkgconf appstream desktop-file-utils
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --locked --bins
+      - name: Test
+        run: cargo test --release --locked
+      - name: Validate metadata
+        run: |
+          desktop-file-validate resources/me.windoesnot.Store.desktop
+          appstreamcli validate --no-net resources/me.windoesnot.Store.metainfo.xml

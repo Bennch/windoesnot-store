@@ -183,10 +183,13 @@ impl SettingsPage {
             let about = adw::AboutWindow::new();
             about.set_application_name("WinDoesNot Store");
             about.set_application_icon("system-software-install");
-            about.set_developer_name("ahmoodio");
+            about.set_developer_name("WinDoesNot contributors");
             about.set_version(env!("CARGO_PKG_VERSION"));
-            about.set_website("https://github.com/ahmoodio/yay-gui-manager");
-            about.set_issue_url("https://github.com/ahmoodio/yay-gui-manager/issues");
+            about.set_website("https://github.com/Bennch/windoesnot-store");
+            about.set_issue_url("https://github.com/Bennch/windoesnot-store/issues");
+            about.set_license_type(gtk::License::MitX11);
+            // Credit the project this store is forked from.
+            about.add_credit_section(Some("Aurora"), &["ahmoodio https://github.com/ahmoodio/aurora"]);
             about.present();
         });
     }

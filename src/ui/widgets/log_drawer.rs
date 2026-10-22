@@ -399,12 +399,12 @@ impl LogDrawer {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let mut candidate = PathBuf::from(dir);
-                candidate.push("aurora-helper");
+                candidate.push("windoesnot-store-helper");
                 if candidate.exists() {
                     return candidate.to_string_lossy().to_string();
                 }
             }
         }
-        "/usr/bin/aurora-helper".to_string()
+        "/usr/bin/windoesnot-store-helper".to_string()
     }
 }

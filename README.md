@@ -1,322 +1,107 @@
+# WinDoesNot Store
 
-# AURORA
-<div align="center">
-  <img src="https://raw.githubusercontent.com/ahmoodio/aurora/main/assets/logo.png" alt="Aurora logo" width="180"/>
+The app store of the [WinDoesNot](https://windoesnot.me) desktop: curated
+recommendations, search across the Arch/CachyOS repositories, the AUR and
+Flathub, and system updates that stay safe for a Hyprland desktop.
 
-  <p><em>A modern, Wayland-first GUI for Arch Linux package management</em></p>
+**[Deutsch weiter unten](#deutsch)**
 
-  [![last-commit](https://img.shields.io/github/last-commit/ahmoodio/aurora?style=flat&logo=git&logoColor=white&color=7C3AED)](https://github.com/ahmoodio/aurora)
-  [![repo-top-language](https://img.shields.io/github/languages/top/ahmoodio/aurora?style=flat&color=7C3AED)](https://github.com/ahmoodio/aurora)
-  [![license](https://img.shields.io/github/license/ahmoodio/aurora?style=flat&color=7C3AED)](https://github.com/ahmoodio/aurora/blob/main/LICENSE)
-  [![Arch Linux](https://img.shields.io/badge/Arch%20Linux-1793D1?logo=arch-linux&logoColor=white)](https://archlinux.org/)
-  [![Wayland](https://img.shields.io/badge/Wayland-ready-success)](https://wayland.freedesktop.org/)
+![Home page in dark mode](docs/screenshots/home-dark.png)
 
-  <p><em>Built with:</em></p>
-  <img alt="Rust" src="https://img.shields.io/badge/Rust-000000.svg?style=flat&logo=rust&logoColor=white">
-  <img alt="GTK4" src="https://img.shields.io/badge/GTK4-4A86CF.svg?style=flat&logo=gtk&logoColor=white">
-  <img alt="libadwaita" src="https://img.shields.io/badge/libadwaita-3D3D3D.svg?style=flat">
-  <img alt="Pacman" src="https://img.shields.io/badge/pacman-1793D1.svg?style=flat&logo=arch-linux&logoColor=white">
+| Search | Light mode |
+|---|---|
+| ![Search results](docs/screenshots/search.png) | ![Home page in light mode](docs/screenshots/home-light.png) |
 
-<p>
-  <a href="#-overview">🌌 Overview</a> •
-  <a href="#-features">✨ Features</a> •
-  <a href="#-why-aurora-vs-pamac--octopi">🌟 Why Aurora</a> •
-  <a href="#-installation">📥 Installation</a> •
-  <a href="#-security-model">🔐 Security</a> •
-  <a href="#-development">🧩 Development</a>
-</p>
-</div>
+> Status: early preview (0.1.0). It is developed for WinDoesNot and tested
+> there; on other Arch-based systems it runs, but the desktop integration
+> (accent colour, light/dark, language) only applies with WinDoesNot.
 
----
+## Features
 
-## 🌌 Overview
+- **Home page** with a banner carousel, category tiles and curated picks.
+  Apps installed via pacman or as a Flatpak are marked as installed.
+- **Search** in the official/CachyOS repositories, the AUR (paru or yay) and
+  Flathub, ordered by relevance, with real app icons: icon theme, AppStream
+  catalogues (`archlinux-appstream-data`, Flathub) or a letter tile.
+- **Safe updates:** updates are only applied as a whole (`pacman -Syu`).
+  Updating single packages is a partial upgrade on Arch and can break
+  software built against exact library versions (e.g. Hyprland plugins).
+- **Privileged operations** go through a small helper started with `pkexec`
+  that only accepts an allowlist of pacman operations.
+- **WinDoesNot integration:** accent colour and light/dark mode follow the
+  desktop settings live; the interface is German or English depending on
+  the desktop or system language.
 
-**Aurora** is a **modern, native GUI package manager for Arch Linux**, designed from the ground up for **Wayland**, **GTK4**, and **libadwaita**.
+## Build and install
 
-Unlike traditional wrappers, Aurora focuses on:
-- clarity over magic  
-- safety over convenience  
-- transparency over hidden automation  
+Requirements: `gtk4`, `libadwaita`, `polkit`, `appstream`; for building
+`cargo` and `clang`. Optional: `archlinux-appstream-data`, `flatpak`, `paru`
+or `yay`.
 
-Aurora integrates:
-- **pacman** for official repositories  
-- **AUR helpers (yay / paru)** for community packages  
-- **AppStream metadata** for rich visuals (icons, screenshots, descriptions)
-
-All wrapped in a clean, store-like interface inspired by modern Linux desktops.
-
----
-
-## ✨ Features
-
-- **Unified Package Management**
-  - Manage official repo packages (pacman)
-  - Manage AUR packages via yay or paru
-  - Clear source badges: Repo / AUR
-
-- **Wayland-First UI**
-  - Built with GTK4 + libadwaita
-  - Smooth animations and adaptive layouts
-  - Native feel on GNOME, COSMIC, and modern Wayland compositors
-
-- **Rich App Details**
-  - AppStream integration for icons and screenshots
-  - Clean app detail pages with versions, descriptions, and metadata
-
-- **Transaction Queue & Review**
-  - Queue installs, removals, and updates
-  - Review all actions before execution
-  - No hidden system changes
-
-- **Live Logs & Feedback**
-  - Real-time stdout/stderr streaming
-  - Copy or save logs for debugging
-  - Clear error messages (no silent failures)
-
-- **Configurable AUR Backend**
-  - Switch between `yay` and `paru`
-  - Interactive by default (no forced `--noconfirm`)
-
----
-## 🌟 Why Aurora vs Pamac / Octopi?
-
-Aurora is **not** trying to replace Pamac or Octopi — it exists to solve a *different set of problems*.
-
-### 🆚 Aurora vs Pamac
-
-| Aurora | Pamac |
-|------|-------|
-| Wayland-first (GTK4 + libadwaita) | Primarily GTK3 / mixed backends |
-| Focused on transparency and safety | Convenience-first abstractions |
-| Explicit transaction review | Often hides low-level pacman details |
-| Strict polkit helper model | Broader privileged execution |
-| Designed for Arch users | Originally designed for Manjaro |
-
-**Aurora’s philosophy:**  
-> *Show the user exactly what will happen — and let them decide.*
-
----
-
-### 🆚 Aurora vs Octopi
-
-| Aurora | Octopi |
-|------|-------|
-| Modern, store-like UI | Traditional utility-style UI |
-| AppStream icons & screenshots | Text-focused package lists |
-| Designed for Wayland + GTK4 | Qt / X11-centric |
-| Guided install & review flow | Power-user workflows |
-| Visual clarity for discovery | Optimized for speed & control |
-
-**Aurora’s philosophy:**  
-> *Package management can be powerful **and** approachable.*
-
----
-
-### 🎯 Who Aurora Is For
-
-Aurora is ideal if you want:
-- A **modern, native Wayland experience**
-- Visual app discovery with real metadata
-- Clear, reviewable system changes
-- A GUI that respects Arch’s philosophy without hiding it
-
-Aurora intentionally avoids:
-- Running entire sessions as root
-- Silent background changes
-- “Magic” automation without visibility
-
----
-
-### 🧠 Design Goal
-
-Aurora aims to sit **between**:
-- **Pamac** (convenience)
-- **Octopi** (raw control)
-
-…offering a **safe, modern middle ground** for Arch users who want clarity without friction.
-
----
-
-## 🔐 Security Model
-
-Aurora is designed with **least privilege** in mind:
-
-* The GUI runs **unprivileged**
-* All system-level operations are executed via:
-  * a **dedicated helper binary** (`/usr/bin/aurora-helper`)
-  * invoked through **polkit (pkexec)**
-* Only **whitelisted pacman actions** are allowed
-* No shell execution, no arbitrary commands
-
-This makes Aurora **safer than traditional GUI wrappers** that run entire sessions as root.
-
-### 🛡️ What the helper whitelists
-
-The helper (`src/bin/aurora-helper.rs`) only forwards a fixed set of
-pacman operations to the real binary. By default, these are:
-
-| pacman op | Meaning                                                |
-|-----------|--------------------------------------------------------|
-| `-S`      | Sync (install) a package                               |
-| `-Syu`    | Full system upgrade (no extra packages allowed)       |
-| `-R`      | Remove a single package (keep deps and config files)   |
-| `-Rns`    | Remove a package **and** its unused deps and configs   |
-| `-U`      | Install a local `.pkg.tar.*` file (path-restricted)    |
-| `-D`      | Modify the install reason (`asdeps` / `asexplicit`)    |
-
-Any other operation (e.g. `-Q`, `-Ss`, `-Si`, `-F`, `-Rdd`, …) is
-**rejected by the helper with** `operation not allowed: <op>`.
-This is **intentional** — `-Rdd` in particular can break your system
-because it skips dependency checks, and `-Q`/`-Ss` only read state
-and do not need root at all, so the helper does not need to allow them.
-
-If you call the helper directly, e.g. from an AUR helper that
-shells out through `pkexec`, and you get a rejection, that is the
-helper doing its job.
-
-### 🧩 Why isn't `-R` (or `-Rns`) allowed by default?
-
-It **is** allowed. The whitelist above is enforced by the helper
-itself, not by polkit. Polkit only governs whether `aurora-helper`
-may run as root at all (see `resources/io.github.ahmoodio.aurora.policy`).
-The helper is the layer that decides **which pacman arguments** are
-permitted.
-
-If you see `aurora-helper error: operation not allowed: -R`, it means
-you are running an older build that predates this whitelist entry.
-Rebuild and reinstall:
-
-```bash
-git pull
-makepkg -si
+```sh
+cargo build --release --locked
+cargo test --release --locked
 ```
 
-### ✏️ Customising the whitelist
+A `PKGBUILD` is included (`makepkg -si`). It installs the app, the helper,
+the polkit policy, the desktop entry and the AppStream metadata.
 
-If you want to allow additional pacman operations (for example
-`-Rs` to remove a package and its dependencies but keep config files),
-edit the `allowed_ops` array in `src/bin/aurora-helper.rs`:
+## Credits and licence
 
-```rust
-let allowed_ops = ["-S", "-Syu", "-R", "-Rs", "-Rns", "-U", "-D"];
-```
+WinDoesNot Store is a fork of [Aurora](https://github.com/ahmoodio/aurora) by
+ahmoodio. Thank you for the solid foundation.
 
-You should also extend the "no packages supplied" guard below it
-to cover the new op, and rebuild:
-
-```bash
-cargo build --release
-sudo install -Dm755 target/release/aurora-helper /usr/bin/aurora-helper
-```
-
-> ⚠️ **Be careful.** The whitelist is the only thing standing
-> between an unprivileged GUI session and root. Adding `-Rdd`,
-> `-Syuu --overwrite '*'`, or anything that bypasses pacman's
-> safety checks will let the GUI (or anything that can talk to
-> the helper) damage your install. Prefer doing destructive
-> operations in a real root shell instead of relaxing the helper.
-
-### 🧪 Calling the helper manually
-
-For debugging or scripting, you can invoke it the same way the
-GUI does:
-
-```bash
-pkexec /usr/bin/aurora-helper pacman -S --noconfirm ripgrep
-pkexec /usr/bin/aurora-helper pacman -Rns --noconfirm ripgrep
-pkexec /usr/bin/aurora-helper pacman pacman -Rns --noconfirm ripgrep
-```
-
-> The `pacman` argument may appear once or twice; the helper
-> tolerates both. Other operations will be refused with
-> `operation not allowed: <op>`.
+MIT licence, see [LICENSE](LICENSE). App names, icons and screenshots shown
+in the store belong to their respective projects.
 
 ---
 
-## 📥 Installation
+## Deutsch
 
-### From AUR (recommended)
+Der App-Store des [WinDoesNot](https://windoesnot.me)-Desktops: kuratierte
+Empfehlungen, Suche in den Arch-/CachyOS-Paketquellen, im AUR und auf Flathub
+sowie Systemupdates, die für einen Hyprland-Desktop sicher bleiben.
 
-Using your favorite AUR helper:
+> Stand: frühe Vorschau (0.1.0). Entwickelt und getestet für WinDoesNot; auf
+> anderen Arch-basierten Systemen läuft der Store ebenfalls, die
+> Desktop-Anbindung (Akzentfarbe, Hell/Dunkel, Sprache) greift aber nur unter
+> WinDoesNot.
 
-```bash
-yay -S aurora-gui-git
+### Funktionen
+
+- **Startseite** mit Banner-Karussell, Kategorie-Kacheln und Empfehlungen.
+  Bereits per pacman oder als Flatpak installierte Apps werden markiert.
+- **Suche** in den offiziellen bzw. CachyOS-Paketquellen, im AUR (paru oder
+  yay) und auf Flathub, nach Relevanz sortiert und mit echten App-Symbolen:
+  Iconset, AppStream-Kataloge (`archlinux-appstream-data`, Flathub) oder eine
+  Buchstabenkachel.
+- **Sichere Updates:** Updates werden nur vollständig eingespielt
+  (`pacman -Syu`). Einzelne Pakete zu aktualisieren ist unter Arch ein
+  Teil-Upgrade und kann Software beschädigen, die gegen genaue
+  Bibliotheksversionen gebaut ist (z. B. Hyprland-Plugins).
+- **Root-Rechte** laufen über einen kleinen Helfer, der per `pkexec` startet
+  und nur freigegebene pacman-Operationen annimmt.
+- **WinDoesNot-Anbindung:** Akzentfarbe sowie Hell/Dunkel folgen live den
+  Desktop-Einstellungen; die Oberfläche ist je nach Desktop- oder
+  Systemsprache deutsch oder englisch.
+
+### Bauen und installieren
+
+Benötigt `gtk4`, `libadwaita`, `polkit` und `appstream`, zum Bauen `cargo` und
+`clang`. Optional: `archlinux-appstream-data`, `flatpak`, `paru` oder `yay`.
+
+```sh
+cargo build --release --locked
+cargo test --release --locked
 ```
 
-or
+Ein `PKGBUILD` liegt bei (`makepkg -si`). Es installiert App, Helfer,
+polkit-Richtlinie, Desktop-Eintrag und AppStream-Metadaten.
 
-```bash
-paru -S aurora-gui-git
-```
+### Herkunft und Lizenz
 
-Prebuilt package (no local Rust build):
+Der WinDoesNot Store ist ein Fork von [Aurora](https://github.com/ahmoodio/aurora)
+von ahmoodio. Danke für die solide Grundlage.
 
-```bash
-yay -S aurora-gui-bin
-```
-
----
-
-### Manual build (for testing)
-
-```bash
-git clone https://github.com/ahmoodio/aurora.git
-cd aurora
-cargo build --release
-./target/release/aurora
-```
-
-> ⚠️ Manual builds do **not** install polkit rules or desktop files.
-
-### Release tags for `aurora-gui-bin`
-
-`aurora-gui-bin` uses GitHub release assets from this repo.  
-When you push a tag like `v0.1.1`, CI builds and uploads:
-
-- `aurora-linux-x86_64.tar.gz`
-- `aurora-linux-x86_64.tar.gz.sha256`
-
-Example:
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
-```
-
----
-
-## 🧩 Development
-
-### Requirements
-
-* Rust (stable)
-* GTK4
-* libadwaita
-* pkgconf
-
-### Run in development mode
-
-```bash
-cargo run
-```
-
----
-
-## 📄 License
-
-MIT License.
-See [`LICENSE`](https://github.com/ahmoodio/aurora/blob/main/LICENSE).
-
----
-
-## ⭐ Support
-
-If Aurora helps you:
-
-* ⭐ Star the repo
-* 🐞 Report issues
-* 💡 Suggest features
-* 🔧 Open pull requests
-
-
-
+MIT-Lizenz, siehe [LICENSE](LICENSE). Im Store gezeigte App-Namen, Symbole und
+Screenshots gehören den jeweiligen Projekten.
