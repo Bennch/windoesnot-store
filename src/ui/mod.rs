@@ -268,7 +268,7 @@ pub fn build_ui(app: &adw::Application) {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("Aurora")
+        .title("WinDoesNot Store")
         .default_width(1200)
         .default_height(800)
         .build();
@@ -310,13 +310,13 @@ pub fn build_ui(app: &adw::Application) {
 
     let sidebar_brand = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     sidebar_brand.add_css_class("sidebar-brand");
-    let brand_icon = gtk::Image::from_icon_name("io.github.ahmoodio.aurora");
+    let brand_icon = gtk::Image::from_icon_name("windoesnot");
     brand_icon.set_pixel_size(30);
     let brand_text = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    let brand_title = gtk::Label::new(Some("Aurora"));
+    let brand_title = gtk::Label::new(Some("WinDoesNot Store"));
     brand_title.add_css_class("sidebar-brand-title");
     brand_title.set_xalign(0.0);
-    let brand_subtitle = gtk::Label::new(Some("Package Manager"));
+    let brand_subtitle = gtk::Label::new(Some("Apps & updates"));
     brand_subtitle.add_css_class("dim-label");
     brand_subtitle.add_css_class("sidebar-brand-subtitle");
     brand_subtitle.set_xalign(0.0);
@@ -356,7 +356,7 @@ pub fn build_ui(app: &adw::Application) {
 
     let nav_view = adw::NavigationView::new();
     let main_page = adw::NavigationPage::builder()
-        .title("Aurora")
+        .title("WinDoesNot Store")
         .child(&stack)
         .build();
     nav_view.push(&main_page);
@@ -1069,63 +1069,65 @@ fn palette_for_theme(theme: ThemeMode) -> ThemePalette {
                 palette_for_theme(ThemeMode::Light)
             }
         }
+        // WinDoesNot palette: flat Windows-11-like surfaces with the desktop accent.
         ThemeMode::Light => ThemePalette {
-            toolbar_from: "rgba(236, 243, 255, 0.98)",
-            toolbar_to: "rgba(221, 233, 250, 0.98)",
-            header_bg: "rgba(243, 247, 255, 0.95)",
-            header_border: "rgba(80, 122, 191, 0.28)",
-            sidebar_from: "rgba(240, 246, 255, 0.98)",
-            sidebar_to: "rgba(231, 241, 255, 0.98)",
-            sidebar_border: "rgba(104, 140, 200, 0.32)",
-            nav_selected_from: "#0f65d9",
-            nav_selected_to: "#3484ff",
-            nav_selected_shadow: "rgba(29, 99, 210, 0.24)",
-            card_from: "rgba(250, 252, 255, 0.98)",
-            card_to: "rgba(240, 247, 255, 0.98)",
-            card_border: "rgba(109, 145, 207, 0.30)",
-            page_bg: "rgba(224, 237, 255, 0.56)",
-            table_header_bg: "rgba(234, 243, 255, 0.84)",
-            table_header_border: "rgba(113, 151, 212, 0.26)",
-            table_header_text: "rgba(40, 64, 105, 0.90)",
-            scroller_border: "rgba(113, 151, 212, 0.24)",
-            scroller_bg: "rgba(237, 246, 255, 0.74)",
-            row_border: "rgba(113, 151, 212, 0.28)",
-            row_bg: "rgba(245, 250, 255, 0.90)",
-            row_hover_bg: "rgba(232, 243, 255, 0.96)",
-            pill_from: "rgba(20, 107, 255, 0.95)",
-            pill_to: "rgba(43, 147, 255, 0.95)",
-            pill_secondary_from: "rgba(31, 189, 118, 0.92)",
-            pill_secondary_to: "rgba(67, 210, 165, 0.92)",
-            pill_secondary_fg: "#0b2018",
+            toolbar_from: "#f3f3f3",
+            toolbar_to: "#f3f3f3",
+            header_bg: "#f3f3f3",
+            header_border: "rgba(0, 0, 0, 0.08)",
+            sidebar_from: "#ebebee",
+            sidebar_to: "#ebebee",
+            sidebar_border: "rgba(0, 0, 0, 0.07)",
+            nav_selected_from: "#fe6f2d",
+            nav_selected_to: "#fe6f2d",
+            nav_selected_shadow: "rgba(254, 111, 45, 0.20)",
+            card_from: "#ffffff",
+            card_to: "#fbfbfb",
+            card_border: "rgba(0, 0, 0, 0.08)",
+            page_bg: "#f3f3f3",
+            table_header_bg: "#ebebee",
+            table_header_border: "rgba(0, 0, 0, 0.07)",
+            table_header_text: "rgba(30, 30, 30, 0.72)",
+            scroller_border: "rgba(0, 0, 0, 0.07)",
+            scroller_bg: "#fafafa",
+            row_border: "rgba(0, 0, 0, 0.07)",
+            row_bg: "#ffffff",
+            row_hover_bg: "#f7f1ec",
+            pill_from: "#fe6f2d",
+            pill_to: "#fe6f2d",
+            pill_secondary_from: "#e4e4e8",
+            pill_secondary_to: "#e4e4e8",
+            pill_secondary_fg: "#2a2a2a",
         },
+        // WinDoesNot palette: flat Windows-11-like surfaces with the desktop accent.
         ThemeMode::Dark => ThemePalette {
-            toolbar_from: "rgba(6, 20, 44, 0.96)",
-            toolbar_to: "rgba(11, 31, 61, 0.96)",
-            header_bg: "rgba(7, 18, 36, 0.86)",
-            header_border: "rgba(90, 130, 190, 0.18)",
-            sidebar_from: "rgba(9, 24, 48, 0.95)",
-            sidebar_to: "rgba(6, 19, 38, 0.95)",
-            sidebar_border: "rgba(96, 138, 210, 0.24)",
-            nav_selected_from: "#1673ff",
-            nav_selected_to: "#2f9bff",
-            nav_selected_shadow: "rgba(9, 89, 221, 0.28)",
-            card_from: "rgba(18, 37, 69, 0.94)",
-            card_to: "rgba(12, 28, 54, 0.92)",
-            card_border: "rgba(92, 128, 191, 0.28)",
-            page_bg: "rgba(8, 22, 43, 0.45)",
-            table_header_bg: "rgba(11, 30, 57, 0.78)",
-            table_header_border: "rgba(96, 132, 190, 0.18)",
-            table_header_text: "rgba(191, 208, 233, 0.88)",
-            scroller_border: "rgba(96, 132, 190, 0.20)",
-            scroller_bg: "rgba(6, 18, 36, 0.42)",
-            row_border: "rgba(97, 134, 198, 0.22)",
-            row_bg: "rgba(13, 29, 56, 0.74)",
-            row_hover_bg: "rgba(18, 40, 74, 0.84)",
-            pill_from: "rgba(35, 96, 255, 0.95)",
-            pill_to: "rgba(29, 145, 255, 0.95)",
-            pill_secondary_from: "rgba(31, 189, 118, 0.92)",
-            pill_secondary_to: "rgba(67, 210, 165, 0.92)",
-            pill_secondary_fg: "#0b2018",
+            toolbar_from: "#1b1b1f",
+            toolbar_to: "#1b1b1f",
+            header_bg: "#1b1b1f",
+            header_border: "rgba(255, 255, 255, 0.06)",
+            sidebar_from: "#232327",
+            sidebar_to: "#232327",
+            sidebar_border: "rgba(255, 255, 255, 0.06)",
+            nav_selected_from: "#fe6f2d",
+            nav_selected_to: "#fe6f2d",
+            nav_selected_shadow: "rgba(254, 111, 45, 0.22)",
+            card_from: "#2b2b30",
+            card_to: "#28282c",
+            card_border: "rgba(255, 255, 255, 0.07)",
+            page_bg: "#202024",
+            table_header_bg: "#26262a",
+            table_header_border: "rgba(255, 255, 255, 0.06)",
+            table_header_text: "rgba(235, 235, 235, 0.72)",
+            scroller_border: "rgba(255, 255, 255, 0.06)",
+            scroller_bg: "#1e1e22",
+            row_border: "rgba(255, 255, 255, 0.06)",
+            row_bg: "#27272b",
+            row_hover_bg: "#303035",
+            pill_from: "#fe6f2d",
+            pill_to: "#fe6f2d",
+            pill_secondary_from: "#3a3a40",
+            pill_secondary_to: "#3a3a40",
+            pill_secondary_fg: "#e6e6e6",
         },
         ThemeMode::Ocean => ThemePalette {
             toolbar_from: "rgba(4, 28, 46, 0.96)",
@@ -1249,6 +1251,14 @@ fn palette_for_theme(theme: ThemeMode) -> ThemePalette {
 fn themed_css(theme: ThemeMode) -> String {
     let palette = palette_for_theme(theme);
     let mut css = r#"
+        @define-color accent_bg_color #fe6f2d;
+        @define-color accent_color #fe783e;
+        @define-color accent_fg_color #ffffff;
+        :root {
+            --accent-bg-color: #fe6f2d;
+            --accent-color: #fe783e;
+            --accent-fg-color: #ffffff;
+        }
         .aurora-toolbar {
             background-image: linear-gradient(135deg, $TOOLBAR_FROM$, $TOOLBAR_TO$);
         }
@@ -1260,7 +1270,7 @@ fn themed_css(theme: ThemeMode) -> String {
         .sidebar-root {
             background-image: linear-gradient(180deg, $SIDEBAR_FROM$, $SIDEBAR_TO$);
             border: 1px solid $SIDEBAR_BORDER$;
-            border-radius: 14px;
+            border-radius: 8px;
         }
         .sidebar-brand {
             padding: 4px 2px;
@@ -1282,7 +1292,7 @@ fn themed_css(theme: ThemeMode) -> String {
         }
         .aurora-nav row {
             margin: 2px 0;
-            border-radius: 10px;
+            border-radius: 6px;
             min-height: 40px;
             transition: all 180ms ease;
         }
@@ -1305,9 +1315,9 @@ fn themed_css(theme: ThemeMode) -> String {
         }
         .card {
             background-image: linear-gradient(170deg, $CARD_FROM$, $CARD_TO$);
-            border-radius: 14px;
+            border-radius: 8px;
             border: 1px solid $CARD_BORDER$;
-            box-shadow: 0 8px 22px rgba(1, 8, 18, 0.30);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
             padding: 14px;
         }
         .package-card {
@@ -1315,7 +1325,7 @@ fn themed_css(theme: ThemeMode) -> String {
         }
         .page-root {
             background-color: $PAGE_BG$;
-            border-radius: 12px;
+            border-radius: 8px;
             padding: 8px;
         }
         .page-controls {
@@ -1345,7 +1355,7 @@ fn themed_css(theme: ThemeMode) -> String {
         }
         .package-row,
         .update-row {
-            border-radius: 10px;
+            border-radius: 6px;
             margin: 4px 6px;
             border: 1px solid $ROW_BORDER$;
             background-color: $ROW_BG$;

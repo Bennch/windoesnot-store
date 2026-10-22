@@ -180,7 +180,7 @@ impl SettingsPage {
 
         self.about_btn.connect_clicked(move |_| {
             let about = adw::AboutWindow::new();
-            about.set_application_name("Aurora");
+            about.set_application_name("WinDoesNot Store");
             about.set_application_icon("io.github.ahmoodio.aurora");
             about.set_developer_name("ahmoodio");
             about.set_version(env!("CARGO_PKG_VERSION"));

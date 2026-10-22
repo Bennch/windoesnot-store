@@ -30,7 +30,7 @@ impl HomePage {
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let logo = logo_image(64);
-        let title = gtk::Label::new(Some("Aurora"));
+        let title = gtk::Label::new(Some("WinDoesNot Store"));
         title.add_css_class("title-1");
         title.set_xalign(0.0);
         header.append(&logo);
@@ -148,6 +148,14 @@ fn refresh_summary(summary: gtk::Label, ctx: AppContext) {
 }
 
 fn logo_image(size: i32) -> gtk::Image {
+    // Prefer the installed WinDoesNot brand icon; keep upstream's logo as fallback.
+    if let Some(display) = gtk::gdk::Display::default() {
+        if gtk::IconTheme::for_display(&display).has_icon("windoesnot") {
+            let image = gtk::Image::from_icon_name("windoesnot");
+            image.set_pixel_size(size);
+            return image;
+        }
+    }
     if let Some(path) = find_logo_path() {
         let image = gtk::Image::from_file(path);
         image.set_pixel_size(size);

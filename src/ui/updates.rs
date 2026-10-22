@@ -69,17 +69,15 @@ impl UpdatesPage {
         let clear_selection_button = gtk::Button::with_label("Select None");
         let apply_selected_button = gtk::Button::with_label("Update Selected");
         let apply_button = gtk::Button::with_label("Update All");
-        apply_selected_button.add_css_class("suggested-action");
+        // WinDoesNot: no per-package updates. Updating a subset (e.g. hyprutils alone)
+        // is a partial upgrade and breaks plugins built against the exact Hyprland ABI.
+        apply_button.add_css_class("suggested-action");
         buttons.append(&check_button);
-        buttons.append(&select_all_button);
-        buttons.append(&clear_selection_button);
-        buttons.append(&apply_selected_button);
         buttons.append(&apply_button);
         root.append(&buttons);
 
         let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         header_row.add_css_class("table-header");
-        header_row.append(&header_label("", false, 3));
         header_row.append(&header_label("Package", true, 0));
         header_row.append(&header_label("Source", false, 10));
         header_row.append(&header_label("Action", false, 10));
@@ -307,6 +305,7 @@ fn render_updates(
     for (action, display) in filtered {
         let check = gtk::CheckButton::new();
         check.set_active(true);
+        check.set_visible(false);
         check.set_margin_end(2);
 
         let name_col = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -330,10 +329,10 @@ fn render_updates(
         source_badge.add_css_class("pill");
         source_badge.set_width_chars(9);
 
+        // Every row on this page is an available update, whatever the queued action kind.
         let mode_badge = gtk::Label::new(Some(match action.kind {
-            ActionKind::Install => "Install",
             ActionKind::Remove => "Remove",
-            ActionKind::Upgrade => "Upgrade",
+            ActionKind::Install | ActionKind::Upgrade => "Update",
         }));
         mode_badge.add_css_class("pill-secondary");
         mode_badge.set_width_chars(9);
