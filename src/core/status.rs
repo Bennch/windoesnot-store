@@ -22,8 +22,33 @@ pub struct NewsEntry {
     pub intervention: bool,
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct Release {
+    pub version: String,
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub unreleased: bool,
+    #[serde(default)]
+    pub de: Vec<String>,
+    #[serde(default)]
+    pub en: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WinDoesNot {
+    /// Installed desktop package version; None on a non-packaged (developer) setup.
+    pub installed: Option<String>,
+    /// Version in the configured WinDoesNot repository, if any.
+    pub available: Option<String>,
+    pub update: bool,
+    /// What the update brings, or what is new in the installed version.
+    pub changes: Vec<Release>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Status {
+    pub windoesnot: WinDoesNot,
     /// Unix seconds of this check.
     pub checked: u64,
     pub updates: Vec<PendingUpdate>,
@@ -47,6 +72,7 @@ pub fn collect(refresh: bool) -> Status {
         Err(_) => (Vec::new(), true),
     };
     Status {
+        windoesnot: windoesnot(),
         checked: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -57,6 +83,93 @@ pub fn collect(refresh: bool) -> Status {
         reboot: kernel_replaced(Path::new("/proc/sys/kernel/osrelease"), Path::new("/usr/lib/modules")),
         relogin: session_replaced(),
     }
+}
+
+/// The running kernel was replaced by an upgrade: restart to use the new one.
+pub fn needs_reboot() -> bool {
+    kernel_replaced(Path::new("/proc/sys/kernel/osrelease"), Path::new("/usr/lib/modules"))
+}
+
+/// Hyprland or Quickshell were replaced: log in again to use the new ones.
+pub fn needs_relogin() -> bool {
+    session_replaced()
+}
+
+const VERSION_FILE: &str = "/usr/share/windoesnot/VERSION";
+const LOCAL_CHANGELOG: &str = "/usr/share/windoesnot/changelog.json";
+/// Changelog of the newest WinDoesNot release on GitHub (assumed repository
+/// name; the project is not uploaded yet, until then this 404s and the
+/// installed changelog is used).
+const REMOTE_CHANGELOG: &str = "https://raw.githubusercontent.com/Bennch/windoesnot/main/packaging/changelog.json";
+
+fn windoesnot() -> WinDoesNot {
+    let installed = std::fs::read_to_string(VERSION_FILE).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let available = repository_version();
+    // GitHub knows the changes of a version before it is installed.
+    let releases = remote_changelog().or_else(|| {
+        std::fs::read_to_string(LOCAL_CHANGELOG).ok().and_then(|text| parse_changelog(&text))
+    }).unwrap_or_default();
+    let update = match (&installed, &available) {
+        (Some(installed), Some(available)) => vercmp(available, installed) > 0,
+        _ => false,
+    };
+    let changes = select_changes(&releases, installed.as_deref(), available.as_deref().filter(|_| update), vercmp);
+    WinDoesNot { installed, available, update, changes }
+}
+
+/// `pacman -Si` from the user-owned sync copy; only set once the WinDoesNot
+/// repository is configured.
+fn repository_version() -> Option<String> {
+    let output = Command::new("pacman")
+        .args(["-Si", "--dbpath"])
+        .arg(crate::core::syncdb::query_dbpath())
+        .arg("windoesnot-desktop")
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("Version").map(|rest| rest.trim_start_matches([' ', ':']).trim().to_string()))
+        .filter(|v| !v.is_empty())
+}
+
+fn remote_changelog() -> Option<Vec<Release>> {
+    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(6)).build();
+    let text = agent.get(REMOTE_CHANGELOG).call().ok()?.into_string().ok()?;
+    parse_changelog(&text)
+}
+
+fn parse_changelog(text: &str) -> Option<Vec<Release>> {
+    #[derive(serde::Deserialize)]
+    struct File {
+        releases: Vec<Release>,
+    }
+    serde_json::from_str::<File>(text).ok().map(|file| file.releases)
+}
+
+/// With an update: the released versions after the installed one up to the
+/// available one. Without: what is new in the installed version.
+fn select_changes(releases: &[Release], installed: Option<&str>, available: Option<&str>, cmp: fn(&str, &str) -> i32) -> Vec<Release> {
+    let Some(installed) = installed else { return Vec::new() };
+    releases
+        .iter()
+        .filter(|release| !release.unreleased)
+        .filter(|release| match available {
+            Some(available) => cmp(&release.version, installed) > 0 && cmp(&release.version, available) <= 0,
+            None => cmp(&release.version, installed) == 0,
+        })
+        .cloned()
+        .collect()
+}
+
+/// pacman's version comparison (epochs, pkgrel).
+fn vercmp(a: &str, b: &str) -> i32 {
+    Command::new("vercmp")
+        .args([a, b])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        .unwrap_or(0)
 }
 
 fn entry(item: &NewsItem) -> NewsEntry {
@@ -133,5 +246,27 @@ mod tests {
         std::fs::write(&release, "7.2.7-1-cachyos\n").unwrap();
         assert!(kernel_replaced(&release, &modules));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn release(version: &str, unreleased: bool) -> Release {
+        Release { version: version.into(), date: None, unreleased, de: vec![], en: vec![] }
+    }
+
+    #[test]
+    fn changes_cover_the_update_or_the_installed_version() {
+        let releases = [release("0.1.0-17", true), release("0.1.0-16", false), release("0.1.0-15", false), release("0.1.0-14", false)];
+        let versions = |list: Vec<Release>| list.into_iter().map(|r| r.version).collect::<Vec<_>>();
+        assert_eq!(versions(select_changes(&releases, Some("0.1.0-14"), Some("0.1.0-16"), vercmp)), ["0.1.0-16", "0.1.0-15"]);
+        assert_eq!(versions(select_changes(&releases, Some("0.1.0-15"), None, vercmp)), ["0.1.0-15"]);
+        assert!(select_changes(&releases, None, Some("0.1.0-16"), vercmp).is_empty());
+    }
+
+    #[test]
+    fn project_changelog_parses() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../packaging/changelog.json"));
+        if let Ok(text) = text {
+            let releases = parse_changelog(&text).expect("valid changelog");
+            assert!(releases.iter().all(|r| !r.de.is_empty() && r.de.len() == r.en.len()));
+        }
     }
 }

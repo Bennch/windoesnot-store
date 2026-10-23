@@ -246,6 +246,71 @@ impl QueueController {
             content.append(&row);
         }
 
+        // Arch asks to read its news before upgrading; native installs upgrade
+        // the whole system, so show unread items here and mark them read on execute.
+        let shown_news: Rc<RefCell<Vec<crate::core::news::NewsItem>>> = Rc::new(RefCell::new(Vec::new()));
+        let upgrades_system = queue.actions.iter().any(|action| {
+            action.kind != ActionKind::Remove && matches!(action.source, PackageSource::Repo | PackageSource::Aur)
+        });
+        if upgrades_system {
+            content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            let heading = gtk::Label::new(Some(t("Arch news")));
+            heading.add_css_class("heading");
+            heading.set_xalign(0.0);
+            content.append(&heading);
+            let news_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            let pending = gtk::Label::new(Some(t("Checking news …")));
+            pending.add_css_class("dim-label");
+            pending.set_xalign(0.0);
+            news_box.append(&pending);
+            content.append(&news_box);
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::core::news::unread().map_err(|err| err.to_string()));
+            });
+            let shown = shown_news.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+                Ok(result) => {
+                    news_box.remove(&pending);
+                    match result {
+                        Ok(items) if items.is_empty() => {
+                            let none = gtk::Label::new(Some(t("No unread news.")));
+                            none.add_css_class("dim-label");
+                            none.set_xalign(0.0);
+                            news_box.append(&none);
+                        }
+                        Ok(items) => {
+                            for item in &items {
+                                if item.needs_intervention() {
+                                    let warning = gtk::Label::new(Some(t("Manual intervention required – read before updating")));
+                                    warning.add_css_class("warning");
+                                    warning.set_xalign(0.0);
+                                    news_box.append(&warning);
+                                }
+                                let link = gtk::LinkButton::with_label(&item.link, &item.title);
+                                link.set_halign(gtk::Align::Start);
+                                if let Some(label) = link.child().and_then(|child| child.downcast::<gtk::Label>().ok()) {
+                                    label.set_wrap(true);
+                                    label.set_xalign(0.0);
+                                }
+                                news_box.append(&link);
+                            }
+                            *shown.borrow_mut() = items;
+                        }
+                        Err(_) => {
+                            let offline = gtk::Label::new(Some(t("News could not be loaded (offline?).")));
+                            offline.add_css_class("dim-label");
+                            offline.set_xalign(0.0);
+                            news_box.append(&offline);
+                        }
+                    }
+                    ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+            });
+        }
+
         let scroller = gtk::ScrolledWindow::new();
         scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         scroller.set_min_content_height(180);
@@ -266,6 +331,7 @@ impl QueueController {
 
         dialog.connect_response(None, move |d: &adw::MessageDialog, resp| {
             if resp == "execute" {
+                crate::core::news::mark_read(&shown_news.borrow());
                 // Entries may have been removed in this dialog.
                 let queue = ctx.queue.lock().unwrap().clone();
                 let plan = match plan_transactions(&queue, &ctx.settings.lock().unwrap()) {
@@ -742,6 +808,19 @@ enum SearchChunk {
 
 
 
+/// "All actions finished." plus what the user has to do for updated core parts.
+fn completion_text() -> String {
+    let mut text = t("All actions finished.").to_string();
+    if crate::core::status::needs_reboot() {
+        text.push_str("\n\n");
+        text.push_str(t("Restart the computer to use the new kernel."));
+    } else if crate::core::status::needs_relogin() {
+        text.push_str("\n\n");
+        text.push_str(t("Log out and in again to use the updated desktop."));
+    }
+    text
+}
+
 /// Marks a result as installed when its app is installed from any source.
 pub fn apply_installed(pkg: &mut PackageSummary, installed: &crate::core::installation::InstalledApps) {
     pkg.installed_via = installed.find(&pkg.name, None).first().map(|installation| installation.source);
@@ -866,7 +945,7 @@ fn run_plan(
             let dialog = adw::MessageDialog::new(
                 Some(&parent),
                 Some(t("Transactions complete")),
-                Some(t("All actions finished.")),
+                Some(&completion_text()),
             );
             dialog.add_response("ok", t("OK"));
             dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
