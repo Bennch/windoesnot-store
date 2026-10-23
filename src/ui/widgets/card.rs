@@ -2,8 +2,8 @@ use gtk::prelude::*;
 use gtk::pango;
 use std::rc::Rc;
 
-use crate::core::models::PackageSummary;
-use crate::i18n::t;
+use crate::core::models::{PackageSource, PackageSummary};
+use crate::i18n::{t, tf};
 use crate::ui::widgets::app_icon::app_icon;
 
 /// Search result tile for a package.
@@ -12,27 +12,26 @@ where
     F: Fn() + 'static,
     G: Fn() + 'static,
 {
-    let badge = match pkg.source {
-        crate::core::models::PackageSource::Repo => "Pacman",
-        crate::core::models::PackageSource::Aur => "AUR",
-        crate::core::models::PackageSource::Flatpak => "Flatpak",
-    };
-    let (tile, button) = build_tile(&pkg.name, &pkg.name, None, &pkg.summary, Some(badge), on_action, on_details);
-    mark_installed(&button, pkg.installed);
+    let (tile, button) = build_tile(&pkg.name, &pkg.name, None, &pkg.summary, Some(pkg.source.label()), on_action, on_details);
+    mark_installed(&button, pkg.installed_via.or(pkg.installed.then_some(pkg.source)));
     tile
 }
 
-/// Shows an install button as "Installed" (inactive) or as a normal install
-/// button again, e.g. after the package was removed.
-pub fn mark_installed(button: &gtk::Button, installed: bool) {
-    if installed {
-        button.set_label(t("Installed"));
-        button.remove_css_class("suggested-action");
-    } else {
-        button.set_label(t("Install"));
-        button.add_css_class("suggested-action");
+/// Shows an install button as "Installed (Flatpak)" etc. (inactive) when the
+/// app is installed from any source, or as a normal install button again,
+/// e.g. after the app was removed.
+pub fn mark_installed(button: &gtk::Button, installed_via: Option<PackageSource>) {
+    match installed_via {
+        Some(source) => {
+            button.set_label(&tf("Installed ({})", &[&source.label()]));
+            button.remove_css_class("suggested-action");
+        }
+        None => {
+            button.set_label(t("Install"));
+            button.add_css_class("suggested-action");
+        }
     }
-    button.set_sensitive(!installed);
+    button.set_sensitive(installed_via.is_none());
 }
 
 /// Wide tile as in Bazaar/GNOME Software: icon, text and action in one row,

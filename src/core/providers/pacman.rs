@@ -39,6 +39,7 @@ impl Pacman {
                 source: PackageSource::Repo,
                 installed: false,
                 origin: None,
+                installed_via: None,
             })
             .collect()
     }
@@ -151,6 +152,7 @@ impl PacmanProvider for Pacman {
                 source,
                 installed: true,
                 origin: None,
+                installed_via: Some(source),
             });
         }
         Ok(results)

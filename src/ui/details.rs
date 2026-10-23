@@ -11,11 +11,14 @@ use adw::prelude::*;
 use crate::core::appstream::AppStreamClient;
 use crate::core::models::{PackageDetails, PackageSource, PackageSummary};
 use crate::ui::{AppContext, UiHandles};
+use crate::core::installation::Installation;
 use crate::ui::widgets::app_icon::app_icon;
 use crate::ui::widgets::screenshot_carousel::ScreenshotCarousel;
 use crate::i18n::{t, tf};
 
-pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSummary) {
+/// `flatpak_id` links a package to its Flatpak where the caller knows it
+/// (curated home apps), so either installation is recognised.
+pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSummary, flatpak_id: Option<String>) {
     let page = adw::NavigationPage::builder()
         .title(&summary.name)
         .build();
@@ -65,16 +68,17 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     header.append(&text_col);
 
     let button_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let installed_state = Rc::new(RefCell::new(summary.installed));
-    let action_btn = gtk::Button::with_label(if summary.installed { t("Remove") } else { t("Install") });
+    // Where the app is installed (any source); decides install vs. remove.
+    let installations: Rc<RefCell<Vec<Installation>>> = Rc::new(RefCell::new(Vec::new()));
+    let action_btn = gtk::Button::with_label(t("Install"));
     action_btn.add_css_class("suggested-action");
-    let update_btn = gtk::Button::with_label(t("Update"));
-    update_btn.set_visible(summary.installed);
+    // Enabled once the installed state is known, so nothing is installed twice.
+    action_btn.set_sensitive(false);
     let open_home_btn = gtk::Button::with_label(t("Open Homepage"));
     open_home_btn.set_visible(false);
     let logs_btn = gtk::Button::with_label(t("View Logs"));
+    // Single-package updates are partial upgrades; updates run via "Update all".
     button_row.append(&action_btn);
-    button_row.append(&update_btn);
     button_row.append(&open_home_btn);
     button_row.append(&logs_btn);
 
@@ -124,32 +128,33 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let description_clone = description.clone();
     let carousel_clone = carousel.clone();
     let action_btn_clone = action_btn.clone();
-    let update_btn_clone = update_btn.clone();
     let open_home_btn_clone = open_home_btn.clone();
     let homepage_clone = homepage.clone();
-    let installed_state_clone = installed_state.clone();
+    let installations_clone = installations.clone();
     let home_url = Rc::new(RefCell::new(None::<String>));
     let home_url_clone = home_url.clone();
     let appstream = ctx.appstream.clone();
 
+    let summary_source = summary.source;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
+        let found = ctx_clone.installed_apps().find(&summary_clone.name, flatpak_id.as_deref());
         let details = load_details(ctx_clone, summary_clone, appstream);
-        let _ = tx.send(details);
+        let _ = tx.send((details, found));
     });
 
     glib::idle_add_local(move || {
         match rx.try_recv() {
-            Ok(details) => {
+            Ok((details, found)) => {
                 summary_label_clone.set_text(&details.summary);
                 version_clone.set_text(&tf("Version: {}", &[&details.version]));
-                installed_clone.set_text(&tf(
-                    "Installed: {}",
-                    &[&if details.installed { t("yes") } else { t("no") }],
-                ));
-                *installed_state_clone.borrow_mut() = details.installed;
-                action_btn_clone.set_label(if details.installed { t("Remove") } else { t("Install") });
-                update_btn_clone.set_visible(details.installed);
+                installed_clone.set_text(&installed_text(&found));
+                action_btn_clone.set_label(&match preferred(&found, summary_source) {
+                    Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
+                    None => t("Install").to_string(),
+                });
+                action_btn_clone.set_sensitive(true);
+                *installations_clone.borrow_mut() = found;
                 if let Some(size) = &details.size {
                     size_clone.set_text(&tf("Size: {}", &[size]));
                 }
@@ -175,21 +180,12 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let pkg_name = summary.name.clone();
     let pkg_source = summary.source;
     let pkg_origin = summary.origin.clone();
-    let installed_state = installed_state.clone();
     action_btn.connect_clicked(move |_| {
-        if *installed_state.borrow() {
-            queue.add_remove(pkg_name.clone(), pkg_source);
-        } else {
-            queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone());
+        // Remove exactly the installation that was found, e.g. the Flatpak.
+        match preferred(&installations.borrow(), pkg_source) {
+            Some(installation) => queue.add_remove(installation.name.clone(), installation.source),
+            None => queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone()),
         }
-    });
-
-    let queue = handles.queue.clone();
-    let pkg_name = summary.name.clone();
-    let pkg_source = summary.source;
-    let pkg_origin = summary.origin.clone();
-    update_btn.connect_clicked(move |_| {
-        queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone());
     });
 
     let home_url = home_url.clone();
@@ -264,4 +260,22 @@ fn fallback_details(summary: &PackageSummary) -> PackageDetails {
         screenshots: Vec::new(),
         icon_name: None,
     }
+}
+
+/// The installation a remove acts on: the one from this page's source if
+/// present, otherwise the first one found.
+fn preferred(found: &[Installation], source: PackageSource) -> Option<&Installation> {
+    found.iter().find(|installation| installation.source == source).or_else(|| found.first())
+}
+
+/// "Installed: no" or "Installed: yes – Flatpak org.gimp.GIMP 3.0.4; …".
+fn installed_text(found: &[Installation]) -> String {
+    if found.is_empty() {
+        return tf("Installed: {}", &[&t("no")]);
+    }
+    let places: Vec<String> = found
+        .iter()
+        .map(|installation| format!("{} {} {}", installation.source.label(), installation.name, installation.version).trim_end().to_string())
+        .collect();
+    tf("Installed: yes – {}", &[&places.join("; ")])
 }

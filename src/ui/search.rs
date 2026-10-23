@@ -172,25 +172,13 @@ impl SearchPage {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker_ctx = ctx.clone();
         std::thread::spawn(move || {
-            let installed = |names: anyhow::Result<Vec<PackageSummary>>| -> std::collections::HashSet<String> {
-                names.unwrap_or_default().into_iter().map(|pkg| pkg.name).collect()
-            };
-            let packages = installed(worker_ctx.pacman.list_installed());
-            let flatpaks = if *worker_ctx.flatpak_available.lock().unwrap() {
-                installed(worker_ctx.flatpak.list_installed())
-            } else {
-                Default::default()
-            };
-            let _ = tx.send((packages, flatpaks));
+            let _ = tx.send(worker_ctx.installed_apps());
         });
         let (page, ctx, handles) = (self.clone(), ctx.clone(), handles.clone());
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || match rx.try_recv() {
-            Ok((packages, flatpaks)) => {
+            Ok(apps) => {
                 for pkg in page.all_results.borrow_mut().iter_mut() {
-                    pkg.installed = match pkg.source {
-                        crate::core::models::PackageSource::Flatpak => flatpaks.contains(&pkg.name),
-                        _ => packages.contains(&pkg.name),
-                    };
+                    crate::ui::apply_installed(pkg, &apps);
                 }
                 page.render_filtered(&ctx, &handles);
                 glib::ControlFlow::Break
@@ -262,6 +250,7 @@ impl SearchPage {
                         &ctx_for_details,
                         &handles_for_details,
                         pkg_for_details.clone(),
+                        None,
                     );
                 },
             );

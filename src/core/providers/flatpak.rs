@@ -47,6 +47,7 @@ impl Flatpak {
                 source: PackageSource::Flatpak,
                 installed: false,
                 origin: if remote.is_empty() { None } else { Some(remote) },
+                installed_via: None,
             });
         }
         results
@@ -78,6 +79,7 @@ impl Flatpak {
                 source: PackageSource::Flatpak,
                 installed: true,
                 origin: None,
+                installed_via: Some(PackageSource::Flatpak),
             });
         }
         results

@@ -7,6 +7,16 @@ pub enum PackageSource {
     Flatpak,
 }
 
+impl PackageSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            PackageSource::Repo => "Pacman",
+            PackageSource::Aur => "AUR",
+            PackageSource::Flatpak => "Flatpak",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageSummary {
     pub name: String,
@@ -15,6 +25,10 @@ pub struct PackageSummary {
     pub source: PackageSource,
     pub installed: bool,
     pub origin: Option<String>,
+    /// Where the app is installed, which may be another source than this
+    /// result (e.g. a repo hit for an app installed as Flatpak).
+    #[serde(default)]
+    pub installed_via: Option<PackageSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +78,13 @@ impl TransactionQueue {
         }
         self.actions.push(action);
         true
+    }
+
+    /// Removes one queued action; true if it was queued.
+    pub fn remove(&mut self, name: &str, source: PackageSource, kind: ActionKind) -> bool {
+        let before = self.actions.len();
+        self.actions.retain(|action| !(action.name == name && action.source == source && action.kind == kind));
+        self.actions.len() != before
     }
 
     pub fn clear(&mut self) {
@@ -256,5 +277,25 @@ impl Default for Settings {
             terminal_mode: TerminalMode::Integrated,
             terminal_emulator: TerminalEmulator::Auto,
         }
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    fn action(name: &str, source: PackageSource, kind: ActionKind) -> TransactionAction {
+        TransactionAction { name: name.into(), source, kind, origin: None }
+    }
+
+    #[test]
+    fn remove_takes_out_only_the_matching_action() {
+        let mut queue = TransactionQueue::default();
+        queue.push(action("gimp", PackageSource::Repo, ActionKind::Install));
+        queue.push(action("org.gimp.GIMP", PackageSource::Flatpak, ActionKind::Remove));
+        assert!(!queue.remove("gimp", PackageSource::Flatpak, ActionKind::Install));
+        assert!(queue.remove("gimp", PackageSource::Repo, ActionKind::Install));
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.actions[0].name, "org.gimp.GIMP");
     }
 }

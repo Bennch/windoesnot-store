@@ -42,6 +42,9 @@ const DE: &[(&str, &str)] = &[
     ("{} of {} results", "{} von {} Ergebnissen"),
     // Cards and details
     ("Install", "Installieren"),
+    ("Installed ({})", "Installiert ({})"),
+    ("Remove ({})", "Entfernen ({})"),
+    ("Installed: yes – {}", "Installiert: ja – {}"),
     ("Details", "Details"),
     ("Remove", "Entfernen"),
     ("Back", "Zurück"),
@@ -110,6 +113,7 @@ const DE: &[(&str, &str)] = &[
     ("Update {} ({})", "{} aktualisieren ({})"),
     ("Added to queue", "Zur Warteschlange hinzugefügt"),
     ("Queue is empty", "Die Warteschlange ist leer"),
+    ("Remove from queue", "Aus der Warteschlange entfernen"),
     ("Add install/remove actions first.", "Füge zuerst Installationen oder Entfernungen hinzu."),
     ("Launching command in external terminal ({})", "Befehl wird im externen Terminal gestartet ({})"),
     ("Failed to start command", "Befehl konnte nicht gestartet werden"),

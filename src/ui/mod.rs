@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::rc::Rc;
@@ -50,6 +50,14 @@ pub struct AppContext {
     pub pacman_installed: Arc<InstalledCache>,
     pub flatpak_installed: Arc<InstalledCache>,
     pub flatpak_available: Arc<Mutex<bool>>,
+}
+
+impl AppContext {
+    /// Everything installed natively or as Flatpak; call off the main thread.
+    pub fn installed_apps(&self) -> crate::core::installation::InstalledApps {
+        let flatpak = *self.flatpak_available.lock().unwrap();
+        crate::core::installation::InstalledApps::load(self.pacman.as_ref(), flatpak.then(|| self.flatpak.as_ref()))
+    }
 }
 
 #[derive(Clone)]
@@ -198,20 +206,43 @@ impl QueueController {
             return;
         }
 
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        let dialog = adw::MessageDialog::new(
+            Some(&self.parent),
+            Some(t("Review Transactions")),
+            Some(t("Installing native packages also updates the whole system. Matching WinDoesNot components are required.")),
+        );
         for action in &queue.actions {
-            let source = match action.source {
-                PackageSource::Repo => "Pacman",
-                PackageSource::Aur => "AUR",
-                PackageSource::Flatpak => "Flatpak",
-            };
             let template = match action.kind {
                 ActionKind::Install => "Install {} ({})",
                 ActionKind::Remove => "Remove {} ({})",
                 ActionKind::Upgrade => "Update {} ({})",
             };
-            let row = gtk::Label::new(Some(&tf(template, &[&action.name, &source])));
-            row.set_xalign(0.0);
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let label = gtk::Label::new(Some(&tf(template, &[&action.name, &action.source.label()])));
+            label.set_xalign(0.0);
+            label.set_hexpand(true);
+            label.set_wrap(true);
+            let remove = gtk::Button::from_icon_name("window-close-symbolic");
+            remove.add_css_class("flat");
+            remove.set_valign(gtk::Align::Center);
+            remove.set_tooltip_text(Some(t("Remove from queue")));
+            let (controller, content_for_row, row_for_remove, dialog_for_row, action) =
+                (self.clone(), content.clone(), row.clone(), dialog.clone(), action.clone());
+            remove.connect_clicked(move |_| {
+                let empty = {
+                    let mut queue = controller.ctx.queue.lock().unwrap();
+                    queue.remove(&action.name, action.source, action.kind);
+                    queue.is_empty()
+                };
+                content_for_row.remove(&row_for_remove);
+                controller.update_label();
+                if empty {
+                    dialog_for_row.close();
+                }
+            });
+            row.append(&label);
+            row.append(&remove);
             content.append(&row);
         }
 
@@ -221,11 +252,6 @@ impl QueueController {
         scroller.set_max_content_height(420);
         scroller.set_child(Some(&content));
 
-        let dialog = adw::MessageDialog::new(
-            Some(&self.parent),
-            Some(t("Review Transactions")),
-            Some(t("Installing native packages also updates the whole system. Matching WinDoesNot components are required.")),
-        );
         dialog.set_extra_child(Some(&scroller));
         dialog.add_response("cancel", t("Cancel"));
         dialog.add_response("execute", t("Execute"));
@@ -240,6 +266,8 @@ impl QueueController {
 
         dialog.connect_response(None, move |d: &adw::MessageDialog, resp| {
             if resp == "execute" {
+                // Entries may have been removed in this dialog.
+                let queue = ctx.queue.lock().unwrap().clone();
                 let plan = match plan_transactions(&queue, &ctx.settings.lock().unwrap()) {
                     Ok(plan) => plan,
                     Err(err) => {
@@ -579,8 +607,6 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
         let pacman_provider = ctx_thread.pacman.clone();
         let aur_provider = ctx_thread.aur.clone();
         let flatpak_provider = ctx_thread.flatpak.clone();
-        let pacman_installed_cache = ctx_thread.pacman_installed.clone();
-        let flatpak_installed_cache = ctx_thread.flatpak_installed.clone();
 
         // Internal channel: sub-threads → collector loop (same thread).
         let (chunk_tx, chunk_rx) = std::sync::mpsc::channel::<SearchChunk>();
@@ -615,32 +641,6 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
                 });
             }
 
-            // Installed-set refreshes (cached, but pre-warm so the
-            // first search shows correct installed badges).
-            let pacman_provider_c = pacman_provider.clone();
-            s.spawn(move || {
-                let _ = pacman_installed_cache.get_or_refresh(|| {
-                    Ok(pacman_provider_c
-                        .list_installed()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|p| p.name)
-                        .collect())
-                });
-            });
-            if flatpak_enabled {
-                let flatpak_provider_c = flatpak_provider.clone();
-                s.spawn(move || {
-                    let _ = flatpak_installed_cache.get_or_refresh(|| {
-                        Ok(flatpak_provider_c
-                            .list_installed()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|p| p.name)
-                            .collect())
-                    });
-                });
-            }
         });
         drop(chunk_tx);
 
@@ -669,40 +669,11 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
             }
         }
 
-        // 3) Apply installed-badges from the (now warm) cache.
-        let pacman_installed = ctx_thread
-            .pacman_installed
-            .get_or_refresh(|| {
-                Ok(ctx_thread
-                    .pacman
-                    .list_installed()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|p| p.name)
-                    .collect())
-            });
-        let flatpak_installed = if flatpak_enabled {
-            ctx_thread.flatpak_installed.get_or_refresh(|| {
-                Ok(ctx_thread
-                    .flatpak
-                    .list_installed()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|p| p.name)
-                    .collect())
-            })
-        } else {
-            HashSet::new()
-        };
-
-        for pkg in &mut pacman_results {
-            pkg.installed = pacman_installed.contains(&pkg.name);
-        }
-        for pkg in &mut aur_results {
-            pkg.installed = pacman_installed.contains(&pkg.name);
-        }
-        for pkg in &mut flatpak_results {
-            pkg.installed = flatpak_installed.contains(&pkg.name);
+        // 3) Mark results installed from any source (e.g. a repo hit for an
+        //    app that is installed as Flatpak).
+        let installed_apps = ctx_thread.installed_apps();
+        for pkg in pacman_results.iter_mut().chain(aur_results.iter_mut()).chain(flatpak_results.iter_mut()) {
+            apply_installed(pkg, &installed_apps);
         }
 
         let mut dedup: HashMap<(PackageSource, String), crate::core::models::PackageSummary> =
@@ -764,6 +735,12 @@ enum SearchChunk {
 }
 
 
+
+/// Marks a result as installed when its app is installed from any source.
+pub fn apply_installed(pkg: &mut PackageSummary, installed: &crate::core::installation::InstalledApps) {
+    pkg.installed_via = installed.find(&pkg.name, None).first().map(|installation| installation.source);
+    pkg.installed = pkg.installed_via.is_some();
+}
 
 fn run_plan(
     plan: TransactionPlan,

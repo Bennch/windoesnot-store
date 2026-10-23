@@ -1,6 +1,7 @@
 pub mod appstream;
 pub mod cache;
 pub mod icons;
+pub mod installation;
 pub mod models;
 pub mod providers;
 pub mod syncdb;

@@ -232,7 +232,7 @@ fn build_row(pkg: PackageSummary, handles: &UiHandles, ctx: &AppContext) -> gtk:
     let handles = handles.clone();
     let ctx = ctx.clone();
     details_btn.connect_clicked(move |_| {
-        details::show_details(&ctx, &handles, pkg.clone());
+        details::show_details(&ctx, &handles, pkg.clone(), None);
     });
 
     row

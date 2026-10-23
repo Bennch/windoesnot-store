@@ -51,6 +51,7 @@ impl Aur {
                 source: PackageSource::Aur,
                 installed: false,
                 origin: None,
+                installed_via: None,
             })
             .collect()
     }

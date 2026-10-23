@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -9,6 +8,7 @@ use adw::prelude::*;
 use glib::ControlFlow;
 use gtk::prelude::*;
 
+use crate::core::installation::InstalledApps;
 use crate::core::models::{PackageSource, PackageSummary};
 use crate::i18n::{t, tf};
 use crate::ui::home_data::{self, Category, HomeApp};
@@ -30,21 +30,12 @@ pub struct HomePage {
     picks: gtk::FlowBox,
     /// Install buttons by app, so installed apps can be marked.
     buttons: Rc<RefCell<Vec<(&'static HomeApp, gtk::Button)>>>,
-    installed: Rc<RefCell<Option<Installed>>>,
+    installed: Rc<RefCell<Option<InstalledApps>>>,
 }
 
-/// Installed pacman packages and Flatpak app ids (lower case).
-struct Installed {
-    packages: HashSet<String>,
-    flatpaks: Vec<String>,
-}
-
-impl Installed {
-    /// Either the repo package or a Flatpak of the same app (e.g. an ESR branch id).
-    fn contains(&self, app: &HomeApp) -> bool {
-        let flathub = app.flathub.to_lowercase();
-        self.packages.contains(app.package) || self.flatpaks.iter().any(|id| id.starts_with(&flathub))
-    }
+/// The source an app is installed from: its package (repo/AUR) or a Flatpak.
+fn installed_via(installed: &InstalledApps, app: &HomeApp) -> Option<PackageSource> {
+    installed.find(app.package, Some(app.flathub)).first().map(|installation| installation.source)
 }
 
 impl HomePage {
@@ -222,7 +213,7 @@ impl HomePage {
             move || open_details(app, &ctx_details, &handles_details),
         );
         if let Some(installed) = self.installed.borrow().as_ref() {
-            card::mark_installed(&button, installed.contains(app));
+            card::mark_installed(&button, installed_via(installed, app));
         }
         self.buttons.borrow_mut().push((app, button));
         tile
@@ -262,23 +253,15 @@ impl HomePage {
     fn refresh_installed(&self, ctx: AppContext) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let packages = ctx.pacman.list_installed().unwrap_or_default().into_iter().map(|pkg| pkg.name).collect();
-            let flatpaks = ctx
-                .flatpak
-                .list_installed()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|pkg| pkg.name.to_lowercase())
-                .collect();
-            let _ = tx.send(Installed { packages, flatpaks });
+            let _ = tx.send(ctx.installed_apps());
         });
         let (buttons, installed) = (self.buttons.clone(), self.installed.clone());
         glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
-            Ok(names) => {
+            Ok(apps) => {
                 for (app, button) in buttons.borrow().iter() {
-                    card::mark_installed(button, names.contains(app));
+                    card::mark_installed(button, installed_via(&apps, app));
                 }
-                *installed.borrow_mut() = Some(names);
+                *installed.borrow_mut() = Some(apps);
                 ControlFlow::Break
             }
             Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
@@ -307,7 +290,9 @@ fn open_details(app: &'static HomeApp, ctx: &AppContext, handles: &UiHandles) {
             source: PackageSource::Repo,
             installed: false,
             origin: None,
+            installed_via: None,
         },
+        Some(app.flathub.to_string()),
     );
 }
 
