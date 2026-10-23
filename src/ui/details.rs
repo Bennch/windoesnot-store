@@ -10,6 +10,7 @@ use adw::prelude::*;
 
 use crate::core::appstream::AppStreamClient;
 use crate::core::models::{PackageDetails, PackageSource, PackageSummary};
+use crate::core::sources::{self, Lookups, SourceOption};
 use crate::ui::{AppContext, UiHandles};
 use crate::core::installation::Installation;
 use crate::ui::widgets::app_icon::app_icon;
@@ -104,8 +105,21 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     description.set_xalign(0.0);
     description.set_wrap(true);
 
+    // Every source that offers this app; the install button uses the chosen one.
+    let sources_heading = gtk::Label::new(Some(t("Install from")));
+    sources_heading.add_css_class("heading");
+    sources_heading.set_xalign(0.0);
+    sources_heading.set_visible(false);
+    let sources_list = gtk::ListBox::new();
+    sources_list.add_css_class("boxed-list");
+    sources_list.set_selection_mode(gtk::SelectionMode::None);
+    sources_list.set_visible(false);
+    let chosen: Rc<RefCell<Option<SourceOption>>> = Rc::new(RefCell::new(None));
+
     root.append(&back_btn);
     root.append(&header);
+    root.append(&sources_heading);
+    root.append(&sources_list);
     root.append(&button_row);
     root.append(carousel.widget());
     root.append(&details);
@@ -136,16 +150,23 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let appstream = ctx.appstream.clone();
 
     let summary_source = summary.source;
+    let sources_heading_clone = sources_heading.clone();
+    let sources_list_clone = sources_list.clone();
+    let chosen_clone = chosen.clone();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let found = ctx_clone.installed_apps().find(&summary_clone.name, flatpak_id.as_deref());
+        let options = source_options(&ctx_clone, &summary_clone, flatpak_id.as_deref());
         let details = load_details(ctx_clone, summary_clone, appstream);
-        let _ = tx.send((details, found));
+        let _ = tx.send((details, found, options));
     });
 
     glib::idle_add_local(move || {
         match rx.try_recv() {
-            Ok((details, found)) => {
+            Ok((details, found, options)) => {
+                fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone);
+                sources_heading_clone.set_visible(!options.is_empty());
+                sources_list_clone.set_visible(!options.is_empty());
                 summary_label_clone.set_text(&details.summary);
                 version_clone.set_text(&tf("Version: {}", &[&details.version]));
                 installed_clone.set_text(&installed_text(&found));
@@ -184,7 +205,10 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         // Remove exactly the installation that was found, e.g. the Flatpak.
         match preferred(&installations.borrow(), pkg_source) {
             Some(installation) => queue.add_remove(installation.name.clone(), installation.source),
-            None => queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone()),
+            None => match chosen.borrow().clone() {
+                Some(option) => queue.add_install(option.name, option.source, option.origin),
+                None => queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone()),
+            },
         }
     });
 
@@ -203,6 +227,92 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         let visible = drawer.is_visible();
         drawer.set_visible(!visible);
     });
+}
+
+/// Repositories, Flathub and (when switched on) the AUR; off the main thread.
+fn source_options(ctx: &AppContext, summary: &PackageSummary, flatpak_id: Option<&str>) -> Vec<SourceOption> {
+    let known = SourceOption {
+        source: summary.source,
+        name: summary.name.clone(),
+        version: summary.version.clone(),
+        size: None,
+        origin: summary.origin.clone(),
+    };
+    let from = |source: PackageSource, details: PackageDetails| SourceOption {
+        source,
+        name: details.name,
+        version: details.version,
+        size: details.size,
+        origin: None,
+    };
+    let repo = |name: &str| ctx.pacman.info_repo(name).ok().filter(|d| !d.version.is_empty()).map(|d| from(PackageSource::Repo, d));
+    let flatpak_on = ctx.flatpak_available.lock().map(|on| *on).unwrap_or(false);
+    let flathub = |query: &str| if flatpak_on { sources::flathub_search(query) } else { Vec::new() };
+    let aur = |name: &str| ctx.aur.info(name).ok().filter(|d| !d.version.is_empty()).map(|d| from(PackageSource::Aur, d));
+    let aur_on = ctx.settings.lock().map(|s| s.aur_available()).unwrap_or(false);
+    // Search hits carry no size; ask the clicked source itself for the full entry.
+    let known = match known.source {
+        PackageSource::Repo => repo(&known.name),
+        PackageSource::Aur if aur_on => aur(&known.name),
+        _ => None,
+    }
+    .map(|full| SourceOption { origin: known.origin.clone(), ..full })
+    .unwrap_or(known);
+    let lookups = Lookups { repo: &repo, flathub: &flathub, aur: aur_on.then_some(&aur as &dyn Fn(&str) -> Option<SourceOption>) };
+    sources::find(&summary.name, flatpak_id, known, &lookups)
+}
+
+/// One row per source with a radio button; the page's own source is preselected.
+fn fill_sources(
+    list: &gtk::ListBox,
+    options: &[SourceOption],
+    found: &[Installation],
+    preselect: PackageSource,
+    chosen: &Rc<RefCell<Option<SourceOption>>>,
+) {
+    while let Some(row) = list.first_child() {
+        list.remove(&row);
+    }
+    let mut group: Option<gtk::CheckButton> = None;
+    for option in options {
+        let (title, hint) = match option.source {
+            PackageSource::Repo => (t("System package sources (recommended)"), t("Checked by the distribution and updated together with the system.")),
+            PackageSource::Flatpak => (t("Flathub (Flatpak)"), t("Runs in its own sandbox and updates separately.")),
+            PackageSource::Aur => (t("AUR (community)"), t("Maintained by users and built on this computer.")),
+        };
+        let mut facts = vec![tf("Version {}", &[&option.version])];
+        if let Some(size) = &option.size {
+            facts.push(size.clone());
+        }
+        let row = adw::ActionRow::builder()
+            .title(title)
+            .subtitle(format!("{} · {}", facts.join(" · "), hint))
+            .subtitle_lines(2)
+            .build();
+        let radio = gtk::CheckButton::new();
+        radio.set_group(group.as_ref());
+        group.get_or_insert_with(|| radio.clone());
+        radio.set_valign(gtk::Align::Center);
+        row.add_prefix(&radio);
+        row.set_activatable_widget(Some(&radio));
+        if found.iter().any(|installation| installation.source == option.source) {
+            let badge = gtk::Label::new(Some(t("Installed")));
+            badge.add_css_class("pill");
+            badge.set_valign(gtk::Align::Center);
+            row.add_suffix(&badge);
+        }
+        let (chosen_for_radio, option_for_radio) = (chosen.clone(), option.clone());
+        radio.connect_toggled(move |radio| {
+            if radio.is_active() {
+                *chosen_for_radio.borrow_mut() = Some(option_for_radio.clone());
+            }
+        });
+        if option.source == preselect {
+            radio.set_active(true);
+            *chosen.borrow_mut() = Some(option.clone());
+        }
+        list.append(&row);
+    }
 }
 
 fn load_details(ctx: AppContext, summary: PackageSummary, appstream: Arc<AppStreamClient>) -> PackageDetails {

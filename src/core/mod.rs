@@ -8,6 +8,7 @@ pub mod news;
 pub mod providers;
 pub mod syncdb;
 pub mod runner;
+pub mod sources;
 pub mod status;
 pub mod transactions;
 

@@ -95,19 +95,19 @@ fn push_unique(found: &mut Vec<Installation>, installation: Installation) {
 }
 
 /// Flatpak ids are reverse-DNS names with at least two dots; package names never contain one.
-fn looks_like_app_id(name: &str) -> bool {
+pub(crate) fn looks_like_app_id(name: &str) -> bool {
     name.matches('.').count() >= 2
 }
 
-fn normalize_id(id: &str) -> String {
+pub(crate) fn normalize_id(id: &str) -> String {
     id.trim().trim_end_matches(".desktop").to_lowercase()
 }
 
-fn ids_for_package(package: &str) -> &'static [String] {
+pub(crate) fn ids_for_package(package: &str) -> &'static [String] {
     catalogue().0.get(package).map(Vec::as_slice).unwrap_or(&[])
 }
 
-fn packages_for_id(id: &str) -> &'static [String] {
+pub(crate) fn packages_for_id(id: &str) -> &'static [String] {
     catalogue().1.get(&normalize_id(id)).map(Vec::as_slice).unwrap_or(&[])
 }
 
