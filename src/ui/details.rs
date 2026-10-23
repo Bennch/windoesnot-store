@@ -11,6 +11,7 @@ use adw::prelude::*;
 use crate::core::appstream::AppStreamClient;
 use crate::core::models::{PackageDetails, PackageSource, PackageSummary};
 use crate::ui::{AppContext, UiHandles};
+use crate::ui::widgets::app_icon::app_icon;
 use crate::ui::widgets::screenshot_carousel::ScreenshotCarousel;
 use crate::i18n::{t, tf};
 
@@ -33,8 +34,10 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     back_btn.set_tooltip_text(Some(t("Back")));
 
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    let icon = gtk::Image::from_icon_name("application-x-executable");
-    icon.set_pixel_size(96);
+    // Same icon as the tile that opened this page.
+    let flathub_id = (summary.source == PackageSource::Flatpak).then_some(summary.name.as_str());
+    let icon = app_icon(&summary.name, flathub_id, 96);
+    icon.set_valign(gtk::Align::Start);
 
     let text_col = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let name = gtk::Label::new(Some(&summary.name));
@@ -114,7 +117,6 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
 
     let ctx_clone = ctx.clone();
     let summary_clone = summary.clone();
-    let icon_clone = icon.clone();
     let summary_label_clone = summary_label.clone();
     let version_clone = version.clone();
     let installed_clone = installed.clone();
@@ -139,9 +141,6 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     glib::idle_add_local(move || {
         match rx.try_recv() {
             Ok(details) => {
-                if let Some(icon_name) = &details.icon_name {
-                    icon_clone.set_icon_name(Some(icon_name));
-                }
                 summary_label_clone.set_text(&details.summary);
                 version_clone.set_text(&tf("Version: {}", &[&details.version]));
                 installed_clone.set_text(&tf(
@@ -211,31 +210,23 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
 }
 
 fn load_details(ctx: AppContext, summary: PackageSummary, appstream: Arc<AppStreamClient>) -> PackageDetails {
+    // Ask the local database instead of trusting the caller: home tiles open
+    // this page without knowing whether the package is installed.
     let mut details = match summary.source {
-        PackageSource::Repo => {
-            if summary.installed {
-                ctx.pacman.info_installed(&summary.name).unwrap_or_else(|_| fallback_details(&summary))
-            } else {
-                ctx.pacman.info_repo(&summary.name).unwrap_or_else(|_| fallback_details(&summary))
-            }
-        }
-        PackageSource::Aur => {
-            if summary.installed {
-                ctx.pacman
-                    .info_installed(&summary.name)
-                    .map(|mut details| {
-                        details.source = PackageSource::Aur;
-                        details.installed = true;
-                        details
-                    })
-                    .or_else(|_| ctx.aur.info(&summary.name))
-                    .unwrap_or_else(|_| fallback_details(&summary))
-            } else {
-                ctx.aur
-                    .info(&summary.name)
-                    .unwrap_or_else(|_| fallback_details(&summary))
-            }
-        }
+        PackageSource::Repo => ctx
+            .pacman
+            .info_installed(&summary.name)
+            .or_else(|_| ctx.pacman.info_repo(&summary.name))
+            .unwrap_or_else(|_| fallback_details(&summary)),
+        PackageSource::Aur => ctx
+            .pacman
+            .info_installed(&summary.name)
+            .map(|mut details| {
+                details.source = PackageSource::Aur;
+                details
+            })
+            .or_else(|_| ctx.aur.info(&summary.name))
+            .unwrap_or_else(|_| fallback_details(&summary)),
         PackageSource::Flatpak => ctx
             .flatpak
             .info(&summary.name)

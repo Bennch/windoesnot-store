@@ -157,6 +157,47 @@ impl SearchPage {
             page.expand_result_limit();
             page.render_filtered(&ctx_for_more, &handles_for_more);
         });
+
+        let page = self.clone();
+        let handles_for_refresh = handles.clone();
+        handles.queue.connect_finished(move || page.refresh_installed(&ctx, &handles_for_refresh));
+    }
+
+    /// Re-reads the installed packages after a transaction and redraws the
+    /// current results, keeping filters and the visible number of results.
+    fn refresh_installed(&self, ctx: &AppContext, handles: &UiHandles) {
+        if self.all_results.borrow().is_empty() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let installed = |names: anyhow::Result<Vec<PackageSummary>>| -> std::collections::HashSet<String> {
+                names.unwrap_or_default().into_iter().map(|pkg| pkg.name).collect()
+            };
+            let packages = installed(worker_ctx.pacman.list_installed());
+            let flatpaks = if *worker_ctx.flatpak_available.lock().unwrap() {
+                installed(worker_ctx.flatpak.list_installed())
+            } else {
+                Default::default()
+            };
+            let _ = tx.send((packages, flatpaks));
+        });
+        let (page, ctx, handles) = (self.clone(), ctx.clone(), handles.clone());
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || match rx.try_recv() {
+            Ok((packages, flatpaks)) => {
+                for pkg in page.all_results.borrow_mut().iter_mut() {
+                    pkg.installed = match pkg.source {
+                        crate::core::models::PackageSource::Flatpak => flatpaks.contains(&pkg.name),
+                        _ => packages.contains(&pkg.name),
+                    };
+                }
+                page.render_filtered(&ctx, &handles);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        });
     }
 
     pub fn set_results(&self, results: Vec<PackageSummary>, ctx: &AppContext, handles: &UiHandles) {

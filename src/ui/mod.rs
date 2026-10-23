@@ -67,7 +67,12 @@ pub struct QueueController {
     log_drawer: widgets::log_drawer::LogDrawer,
     parent: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
+    finished: FinishedListeners,
 }
+
+/// Called on the main thread whenever a transaction run ends, successful or
+/// not, so pages can show the new installed state.
+type FinishedListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
 
 impl QueueController {
     pub fn new(
@@ -83,7 +88,12 @@ impl QueueController {
             log_drawer,
             parent,
             toasts,
+            finished: Rc::new(RefCell::new(Vec::new())),
         }
+    }
+
+    pub fn connect_finished(&self, listener: impl Fn() + 'static) {
+        self.finished.borrow_mut().push(Rc::new(listener));
     }
 
     fn update_label(&self) {
@@ -226,6 +236,7 @@ impl QueueController {
         let parent = self.parent.clone();
         let button = self.button.clone();
         let toasts = self.toasts.clone();
+        let finished = self.finished.clone();
 
         dialog.connect_response(None, move |d: &adw::MessageDialog, resp| {
             if resp == "execute" {
@@ -237,7 +248,7 @@ impl QueueController {
                         return;
                     }
                 };
-                let started = run_plan(plan, &ctx, &log_drawer, &parent, &toasts);
+                let started = run_plan(plan, &ctx, &log_drawer, &parent, &toasts, &finished);
                 if started {
                     ctx.queue.lock().unwrap().clear();
                     button.set_label(t("Queue (0)"));
@@ -489,10 +500,25 @@ pub fn build_ui(app: &adw::Application) {
     let handles_for_sidebar = handles.clone();
     let nav_for_sidebar = nav_view.clone();
     let main_page_for_sidebar = main_page.clone();
+    // GTK re-emits row-selected for the current row when focus moves, e.g. when
+    // a details page is pushed; returning to the main page then would close it
+    // again at once. Only a changed selection switches pages here; clicking the
+    // current row is handled by row-activated below.
+    let selected_row = Rc::new(std::cell::Cell::new(-1));
+    {
+        let nav = nav_view.clone();
+        let main_page = main_page.clone();
+        sidebar.connect_row_activated(move |_, _| {
+            let _ = nav.pop_to_page(&main_page);
+        });
+    }
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            let _ = nav_for_sidebar.pop_to_page(&main_page_for_sidebar);
             let index = row.index();
+            if selected_row.replace(index) == index {
+                return;
+            }
+            let _ = nav_for_sidebar.pop_to_page(&main_page_for_sidebar);
             match index {
                 0 => stack_for_sidebar.set_visible_child_name("home"),
                 1 => stack_for_sidebar.set_visible_child_name("search"),
@@ -745,6 +771,7 @@ fn run_plan(
     log_drawer: &widgets::log_drawer::LogDrawer,
     parent: &adw::ApplicationWindow,
     toasts: &adw::ToastOverlay,
+    finished: &FinishedListeners,
 ) -> bool {
     if plan.commands.is_empty() {
         return false;
@@ -814,6 +841,18 @@ fn run_plan(
     let lock_hint_shown = Rc::new(RefCell::new(false));
     let abi_conflict = Rc::new(RefCell::new(false));
     let in_progress = ctx_clone.transaction_in_progress.clone();
+    // Every end of the run, successful or not, may have changed installed packages.
+    let notify_finished: Rc<dyn Fn()> = {
+        let (finished, ctx) = (finished.clone(), ctx.clone());
+        Rc::new(move || {
+            ctx.pacman_installed.invalidate();
+            ctx.flatpak_installed.invalidate();
+            let listeners: Vec<_> = finished.borrow().clone();
+            for listener in listeners {
+                listener();
+            }
+        })
+    };
 
     // Slot that always points at the handle of the currently-running
     // command. The log-drawer Cancel button calls this, which terminates
@@ -839,6 +878,7 @@ fn run_plan(
         let mut cmds = commands.borrow_mut();
         if cmds.is_empty() {
             *in_progress.lock().unwrap() = false;
+            notify_finished();
             log_drawer.set_cancel_handler(None::<fn()>);
             let dialog = adw::MessageDialog::new(
                 Some(&parent),
@@ -883,6 +923,7 @@ fn run_plan(
             Ok(h) => h,
             Err(err) => {
                 *in_progress.lock().unwrap() = false;
+                notify_finished();
                 log_drawer.set_cancel_handler(None::<fn()>);
                 toasts.add_toast(adw::Toast::new(t("Failed to start command")));
                 log_drawer.append_line(&tf("Failed to start command: {}", &[&err]), log_limit);
@@ -900,6 +941,7 @@ fn run_plan(
         let abi_conflict = abi_conflict.clone();
         let in_progress = in_progress.clone();
         let current_handle = current_handle.clone();
+        let notify_finished = notify_finished.clone();
         // --noconfirm answers every prompt itself; a dialog would only linger.
         let allow_prompt_dialog = terminal_mode == TerminalMode::Integrated && interactive;
     glib::idle_add_local(move || match rx.try_recv() {
@@ -938,6 +980,7 @@ fn run_plan(
                         *current_handle.borrow_mut() = None;
                         if code != 0 {
                             *in_progress.lock().unwrap() = false;
+                            notify_finished();
                             log_drawer.set_cancel_handler(None::<fn()>);
                             toasts.add_toast(adw::Toast::new(&tf(
                                 "Command failed ({})",
@@ -960,6 +1003,7 @@ fn run_plan(
                             next();
                         } else {
                             *in_progress.lock().unwrap() = false;
+                            notify_finished();
                             log_drawer.set_cancel_handler(None::<fn()>);
                         }
                         return ControlFlow::Break;
@@ -970,6 +1014,7 @@ fn run_plan(
             Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 *in_progress.lock().unwrap() = false;
+                notify_finished();
                 log_drawer.set_cancel_handler(None::<fn()>);
                 ControlFlow::Break
             }

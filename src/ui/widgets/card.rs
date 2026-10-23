@@ -17,8 +17,22 @@ where
         crate::core::models::PackageSource::Aur => "AUR",
         crate::core::models::PackageSource::Flatpak => "Flatpak",
     };
-    let (tile, _button) = build_tile(&pkg.name, &pkg.name, None, &pkg.summary, Some(badge), on_action, on_details);
+    let (tile, button) = build_tile(&pkg.name, &pkg.name, None, &pkg.summary, Some(badge), on_action, on_details);
+    mark_installed(&button, pkg.installed);
     tile
+}
+
+/// Shows an install button as "Installed" (inactive) or as a normal install
+/// button again, e.g. after the package was removed.
+pub fn mark_installed(button: &gtk::Button, installed: bool) {
+    if installed {
+        button.set_label(t("Installed"));
+        button.remove_css_class("suggested-action");
+    } else {
+        button.set_label(t("Install"));
+        button.add_css_class("suggested-action");
+    }
+    button.set_sensitive(!installed);
 }
 
 /// Wide tile as in Bazaar/GNOME Software: icon, text and action in one row,

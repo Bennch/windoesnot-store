@@ -32,6 +32,11 @@ fn plan_with_helper(queue: &TransactionQueue, settings: &Settings, helper: Optio
             "No AUR helper installed. Install paru or yay to use AUR."
         )))?;
     }
+    if settings.aur_helper == AurHelperKind::Paru
+        && queue.actions.iter().any(|action| action.source == PackageSource::Aur && action.kind != ActionKind::Remove)
+    {
+        return Ok(paru_plan(queue, &settings));
+    }
     let mut commands = Vec::new();
     // Whether this plan already runs a full native upgrade before the current
     // action; a later AUR build then needs no separate preflight.
@@ -66,6 +71,48 @@ fn plan_with_helper(queue: &TransactionQueue, settings: &Settings, helper: Optio
         i += 1;
     }
     Ok(TransactionPlan { commands })
+}
+
+/// With AUR builds and paru, one paru run does the native full upgrade
+/// (including the queued repo packages) and then the AUR builds. polkit keeps
+/// an authorization only for the process that asked for it, so a separate
+/// store-helper upgrade before paru meant a second password prompt. paru
+/// upgrades first and stops before building when pacman refuses, e.g. because
+/// a WinDoesNot package pins Hyprland (tested in a VM).
+fn paru_plan(queue: &TransactionQueue, settings: &Settings) -> TransactionPlan {
+    let mut commands = Vec::new();
+    let mut targets = Vec::new();
+    let mut slot = None;
+    for action in &queue.actions {
+        let joins = action.kind != ActionKind::Remove
+            && matches!(action.source, PackageSource::Repo | PackageSource::Aur);
+        if !joins {
+            commands.extend(command_for_action(action, settings));
+            continue;
+        }
+        // Updates are covered by the full upgrade itself.
+        if action.kind == ActionKind::Install {
+            let target = match action.source {
+                PackageSource::Aur => format!("aur/{}", action.name),
+                _ => action.name.clone(),
+            };
+            if !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+        // The combined run takes the place of the first native or AUR action.
+        if slot.is_none() {
+            slot = Some(commands.len());
+        }
+    }
+    let mut args = vec!["-Syu".to_string(), "--needed".to_string()];
+    if settings.allow_noconfirm || settings.terminal_mode == TerminalMode::Integrated {
+        args.push("--noconfirm".to_string());
+    }
+    args.extend(targets);
+    let paru = with_privileged_helper(CommandSpec::new(AurHelperKind::Paru.as_str(), args), &helper_path());
+    commands.insert(slot.unwrap_or(0), paru);
+    TransactionPlan { commands }
 }
 
 fn repo_install_command(settings: &Settings, targets: Vec<String>) -> CommandSpec {
@@ -145,14 +192,15 @@ fn aur_command(helper: AurHelperKind, op: &str, pkg: Option<&str>, noconfirm: &[
         args.push(if op == "-Rns" { pkg.to_string() } else { format!("aur/{pkg}") });
     }
 
-    // Best-effort: ask yay/paru to use pkexec + windoesnot-store-helper for pacman calls.
-    // This respects the "privileged ops via helper" requirement when supported by the helper.
-    args.push("--sudo".to_string());
-    args.push("pkexec".to_string());
-    args.push("--sudoflags".to_string());
-    args.push(helper_path.to_string());
+    with_privileged_helper(CommandSpec::new(helper.as_str(), args), helper_path)
+}
 
-    CommandSpec::new(helper.as_str(), args)
+/// Lets yay/paru run their pacman calls through pkexec and the store helper.
+fn with_privileged_helper(mut command: CommandSpec, helper_path: &str) -> CommandSpec {
+    for arg in ["--sudo", "pkexec", "--sudoflags", helper_path] {
+        command.args.push(arg.to_string());
+    }
+    command
 }
 
 fn helper_path() -> String {
@@ -206,31 +254,60 @@ mod tests {
     }
 
     #[test]
-    fn aur_install_requires_native_upgrade_first_and_keeps_target() {
+    fn yay_aur_install_requires_native_upgrade_first_and_keeps_target() {
         let queue = TransactionQueue { actions: vec![
             action(PackageSource::Aur, ActionKind::Install, "localsend-bin"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Yay)).unwrap();
         assert_eq!(plan.commands.len(), 2);
         assert_eq!(plan.commands[0].program, "pkexec");
         assert_eq!(plan.commands[0].args[2], "-Syu");
         let aur = &plan.commands[1];
-        assert_eq!(aur.program, "paru");
-        // aur/ keeps paru from picking a repo package that provides the name.
+        assert_eq!(aur.program, "yay");
+        // aur/ keeps the helper from picking a repo package that provides the name.
         assert_eq!(&aur.args[..4], ["-Syu", "--needed", "--noconfirm", "aur/localsend-bin"]);
     }
 
     #[test]
-    fn one_native_upgrade_covers_later_aur_builds() {
+    fn yay_one_native_upgrade_covers_later_aur_builds() {
         let queue = TransactionQueue { actions: vec![
             action(PackageSource::Repo, ActionKind::Install, "htop"),
             action(PackageSource::Aur, ActionKind::Install, "pfetch"),
             action(PackageSource::Aur, ActionKind::Install, "localsend-bin"),
         ] };
+        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Yay)).unwrap();
+        let programs: Vec<_> = plan.commands.iter().map(|command| command.program.as_str()).collect();
+        assert_eq!(programs, ["pkexec", "yay", "yay"]);
+        assert!(plan.commands[0].args.iter().any(|arg| arg == "htop"));
+    }
+
+    #[test]
+    fn paru_runs_native_and_aur_installs_in_one_process() {
+        let queue = TransactionQueue { actions: vec![
+            action(PackageSource::Repo, ActionKind::Install, "htop"),
+            action(PackageSource::Aur, ActionKind::Install, "pfetch"),
+            action(PackageSource::Repo, ActionKind::Upgrade, "system"),
+            action(PackageSource::Aur, ActionKind::Install, "pfetch"),
+        ] };
+        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        assert_eq!(plan.commands.len(), 1);
+        let paru = &plan.commands[0];
+        assert_eq!(paru.program, "paru");
+        assert_eq!(&paru.args[..5], ["-Syu", "--needed", "--noconfirm", "htop", "aur/pfetch"]);
+        assert_eq!(&paru.args[5..], ["--sudo", "pkexec", "--sudoflags", helper_path().as_str()]);
+    }
+
+    #[test]
+    fn paru_plan_keeps_removals_and_flatpak_in_order() {
+        let queue = TransactionQueue { actions: vec![
+            action(PackageSource::Repo, ActionKind::Remove, "vlc"),
+            action(PackageSource::Aur, ActionKind::Install, "pfetch"),
+            action(PackageSource::Flatpak, ActionKind::Install, "org.gimp.GIMP"),
+        ] };
         let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
         let programs: Vec<_> = plan.commands.iter().map(|command| command.program.as_str()).collect();
-        assert_eq!(programs, ["pkexec", "paru", "paru"]);
-        assert!(plan.commands[0].args.iter().any(|arg| arg == "htop"));
+        assert_eq!(programs, ["pkexec", "paru", "flatpak"]);
+        assert_eq!(plan.commands[0].args[2], "-Rns");
     }
 
     #[test]

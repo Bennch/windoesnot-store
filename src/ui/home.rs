@@ -155,6 +155,9 @@ impl HomePage {
         }
 
         self.refresh_installed(ctx.clone());
+        let page = self.clone();
+        let ctx_for_refresh = ctx.clone();
+        handles.queue.connect_finished(move || page.refresh_installed(ctx_for_refresh.clone()));
         refresh_summary(self.summary_label.clone(), ctx);
     }
 
@@ -219,7 +222,7 @@ impl HomePage {
             move || open_details(app, &ctx_details, &handles_details),
         );
         if let Some(installed) = self.installed.borrow().as_ref() {
-            mark_installed(&button, installed.contains(app));
+            card::mark_installed(&button, installed.contains(app));
         }
         self.buttons.borrow_mut().push((app, button));
         tile
@@ -273,7 +276,7 @@ impl HomePage {
         glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
             Ok(names) => {
                 for (app, button) in buttons.borrow().iter() {
-                    mark_installed(button, names.contains(app));
+                    card::mark_installed(button, names.contains(app));
                 }
                 *installed.borrow_mut() = Some(names);
                 ControlFlow::Break
@@ -281,14 +284,6 @@ impl HomePage {
             Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
         });
-    }
-}
-
-fn mark_installed(button: &gtk::Button, installed: bool) {
-    if installed {
-        button.set_label(t("Installed"));
-        button.remove_css_class("suggested-action");
-        button.set_sensitive(false);
     }
 }
 
