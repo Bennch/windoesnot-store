@@ -33,7 +33,10 @@ fn main() {
         println!("{}", serde_json::to_string(&status).unwrap_or_else(|_| "{}".into()));
         return;
     }
-    if args.iter().any(|arg| arg == "--updates") {
+    if args.iter().any(|arg| arg == "--upgrade") {
+        // From the desktop settings: review the full upgrade right away.
+        ui::START_PAGE.set("upgrade").ok();
+    } else if args.iter().any(|arg| arg == "--updates") {
         ui::START_PAGE.set("updates").ok();
     }
     let app = app::AuroraApp::new();

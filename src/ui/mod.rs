@@ -207,19 +207,33 @@ impl QueueController {
         }
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        let only_updates = queue.actions.iter().all(|action| action.kind == ActionKind::Upgrade);
         let dialog = adw::MessageDialog::new(
             Some(&self.parent),
-            Some(t("Review Transactions")),
-            Some(t("Installing native packages also updates the whole system. Matching WinDoesNot components are required.")),
+            Some(t(if only_updates { "Install updates" } else { "Review Transactions" })),
+            Some(t(if only_updates {
+                "Everything is updated together in one step. Your files and settings stay as they are."
+            } else {
+                "Installing native packages also updates the whole system. Matching WinDoesNot components are required."
+            })),
         );
         for action in &queue.actions {
-            let template = match action.kind {
-                ActionKind::Install => "Install {} ({})",
-                ActionKind::Remove => "Remove {} ({})",
-                ActionKind::Upgrade => "Update {} ({})",
+            // The full upgrade's actions are named after their source, not a package.
+            let text = match (action.kind, action.name.as_str()) {
+                (ActionKind::Upgrade, "system") => t("System and programs").to_string(),
+                (ActionKind::Upgrade, "aur") => t("Programs from the AUR").to_string(),
+                (ActionKind::Upgrade, "flatpak") => t("Flatpak apps").to_string(),
+                (kind, _) => {
+                    let template = match kind {
+                        ActionKind::Install => "Install {} ({})",
+                        ActionKind::Remove => "Remove {} ({})",
+                        ActionKind::Upgrade => "Update {} ({})",
+                    };
+                    tf(template, &[&action.name, &action.source.label()])
+                }
             };
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            let label = gtk::Label::new(Some(&tf(template, &[&action.name, &action.source.label()])));
+            let label = gtk::Label::new(Some(&text));
             label.set_xalign(0.0);
             label.set_hexpand(true);
             label.set_wrap(true);
@@ -279,7 +293,9 @@ impl QueueController {
                             none.set_xalign(0.0);
                             news_box.append(&none);
                         }
-                        Ok(items) => {
+                        Ok(mut items) => {
+                            // Items that need action come first, each with its warning.
+                            items.sort_by_key(|item| !item.needs_intervention());
                             for item in &items {
                                 if item.needs_intervention() {
                                     let warning = gtk::Label::new(Some(t("Manual intervention required – read before updating")));
@@ -313,7 +329,7 @@ impl QueueController {
 
         let scroller = gtk::ScrolledWindow::new();
         scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-        scroller.set_min_content_height(180);
+        scroller.set_min_content_height(260);
         scroller.set_max_content_height(420);
         scroller.set_child(Some(&content));
 
@@ -626,8 +642,8 @@ pub fn build_ui(app: &adw::Application) {
             }
         }
     });
-    // Opened from the desktop settings with --updates.
-    if START_PAGE.get() == Some(&"updates") {
+    // Opened from the desktop settings with --updates or --upgrade.
+    if matches!(START_PAGE.get(), Some(&"updates") | Some(&"upgrade")) {
         sidebar.select_row(sidebar.row_at_index(3).as_ref());
     }
 
@@ -658,6 +674,13 @@ pub fn build_ui(app: &adw::Application) {
     });
 
     window.present();
+    if START_PAGE.get() == Some(&"upgrade") {
+        let controller = queue_controller.clone();
+        glib::idle_add_local_once(move || {
+            controller.add_upgrade_all();
+            controller.show_review_dialog();
+        });
+    }
 }
 
 /// Page to show at start, set by main from the command line.

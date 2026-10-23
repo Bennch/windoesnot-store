@@ -6,14 +6,22 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::core::classify::{self, Category, Group, Restart};
 use crate::core::news::{self, NewsItem};
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, Default)]
 pub struct PendingUpdate {
     pub name: String,
     pub old: String,
     pub new: String,
     pub source: String,
+    /// WinDoesNot, a program people recognise, or a system component.
+    pub category: Category,
+    pub group: Group,
+    /// Program name and icon from its desktop entry (programs only).
+    pub app_name: Option<String>,
+    pub icon: Option<String>,
+    pub restart: Option<Restart>,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +71,24 @@ pub struct Status {
     pub aur_enabled: bool,
     pub aur_available: bool,
     pub aur_error: Option<String>,
+    /// Unix seconds of the newest package database; None when no database was
+    /// ever downloaded, so "no updates" would mean "not checked".
+    pub databases_checked: Option<u64>,
+}
+
+/// Adds category, group, program name/icon and restart need to each update.
+fn annotate(updates: &mut [PendingUpdate]) {
+    let language = classify::language();
+    for update in updates.iter_mut() {
+        let app = classify::installed_app(&update.name, &update.old, &language);
+        update.category = classify::category(&update.name, app.as_ref());
+        update.group = classify::group(&update.name);
+        update.restart = classify::restart(&update.name);
+        if let Some(app) = app {
+            update.app_name = Some(app.name);
+            update.icon = app.icon;
+        }
+    }
 }
 
 pub fn collect(refresh: bool) -> Status {
@@ -77,6 +103,9 @@ pub fn collect(refresh: bool) -> Status {
         Err(_) => (Vec::new(), true),
     };
     let mut updates = pending_updates();
+    let databases_checked = crate::core::syncdb::last_refreshed()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|age| age.as_secs());
     let mut aur_error = None;
     if settings.aur_available() {
         if let Some(helper) = settings.aur_helper.installed() {
@@ -86,6 +115,7 @@ pub fn collect(refresh: bool) -> Status {
             }
         }
     }
+    annotate(&mut updates);
     Status {
         windoesnot: windoesnot(),
         checked: std::time::SystemTime::now()
@@ -100,6 +130,7 @@ pub fn collect(refresh: bool) -> Status {
         aur_enabled: settings.aur_enabled,
         aur_available: settings.aur_available(),
         aur_error,
+        databases_checked,
     }
 }
 
@@ -238,7 +269,7 @@ fn parse_pending_with_source(output: &str, source: &str) -> Vec<PendingUpdate> {
             let old = parts.next()?.to_string();
             (parts.next()? == "->").then_some(())?;
             let new = parts.next()?.to_string();
-            Some(PendingUpdate { name, old, new, source: source.to_string() })
+            Some(PendingUpdate { name, old, new, source: source.to_string(), ..Default::default() })
         })
         .collect()
 }
@@ -283,7 +314,7 @@ mod tests {
         let output = "linux-cachyos 7.2.7-1 -> 7.2.11-1\nhyprland 0.56.2-4 -> 0.57.0-1 [ignored]\nbroken line\n";
         let updates = parse_pending(output);
         assert_eq!(updates.len(), 2);
-        assert_eq!(updates[0], PendingUpdate { name: "linux-cachyos".into(), old: "7.2.7-1".into(), new: "7.2.11-1".into(), source: "repo".into() });
+        assert_eq!(updates[0], PendingUpdate { name: "linux-cachyos".into(), old: "7.2.7-1".into(), new: "7.2.11-1".into(), source: "repo".into(), ..Default::default() });
     }
 
     #[test]

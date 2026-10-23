@@ -88,6 +88,16 @@ fn prepare(copy: &Path, system: &Path) -> Result<()> {
     Ok(())
 }
 
+/// When package data was last downloaded: the newer of the user copy and the
+/// system databases. None on a fresh system that never went online.
+pub fn last_refreshed() -> Option<SystemTime> {
+    [dir().join("sync"), Path::new(SYSTEM_DB).join("sync")]
+        .iter()
+        .flat_map(|sync| database_files(sync).collect::<Vec<_>>())
+        .filter_map(|path| fs::metadata(path).and_then(|meta| meta.modified()).ok())
+        .max()
+}
+
 fn has_sync_data(copy: &Path) -> bool {
     database_files(&copy.join("sync")).next().is_some()
 }

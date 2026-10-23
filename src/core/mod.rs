@@ -1,4 +1,5 @@
 pub mod appstream;
+pub mod classify;
 pub mod cache;
 pub mod icons;
 pub mod installation;
