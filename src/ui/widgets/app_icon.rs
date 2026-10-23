@@ -17,10 +17,17 @@ pub fn app_icon(package: &str, flathub_id: Option<&str>, size: i32) -> gtk::Widg
             return image.upcast();
         }
     }
+    // Decode explicitly: GTK 4.24's Image::from_file does not recognise the
+    // catalogue's JPEG XL icons and shows an empty picture instead.
     if let Some(path) = icons::icon_file(package, flathub_id) {
-        let image = gtk::Image::from_file(path);
-        image.set_pixel_size(size);
-        return image.upcast();
+        match gtk::gdk::Texture::from_filename(&path) {
+            Ok(texture) => {
+                let image = gtk::Image::from_paintable(Some(&texture));
+                image.set_pixel_size(size);
+                return image.upcast();
+            }
+            Err(err) => eprintln!("windoesnot-store: icon {} not loaded: {err}", path.display()),
+        }
     }
     letter_tile(package, size)
 }

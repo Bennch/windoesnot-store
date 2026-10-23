@@ -852,6 +852,7 @@ fn run_plan(
             return;
         }
         let cmd = cmds.remove(0);
+        let interactive = !cmd.args.iter().any(|arg| arg == "--noconfirm");
         let command_trace = format!("$ {}", cmd.display_line());
         let (tx, rx) = mpsc::channel();
         let (input_tx, input_rx) = mpsc::channel();
@@ -899,7 +900,8 @@ fn run_plan(
         let abi_conflict = abi_conflict.clone();
         let in_progress = in_progress.clone();
         let current_handle = current_handle.clone();
-        let allow_prompt_dialog = terminal_mode == TerminalMode::Integrated;
+        // --noconfirm answers every prompt itself; a dialog would only linger.
+        let allow_prompt_dialog = terminal_mode == TerminalMode::Integrated && interactive;
     glib::idle_add_local(move || match rx.try_recv() {
             Ok(event) => {
                 match event {

@@ -33,6 +33,9 @@ fn plan_with_helper(queue: &TransactionQueue, settings: &Settings, helper: Optio
         )))?;
     }
     let mut commands = Vec::new();
+    // Whether this plan already runs a full native upgrade before the current
+    // action; a later AUR build then needs no separate preflight.
+    let mut native_upgraded = false;
     let mut i = 0;
     while i < queue.actions.len() {
         let action = &queue.actions[i];
@@ -48,12 +51,14 @@ fn plan_with_helper(queue: &TransactionQueue, settings: &Settings, helper: Optio
                 i += 1;
             }
             commands.push(repo_install_command(&settings, targets));
+            native_upgraded = true;
             continue;
         }
-        if action.source == PackageSource::Aur && action.kind != ActionKind::Remove {
+        if action.source == PackageSource::Aur && action.kind != ActionKind::Remove && !native_upgraded {
             // Stop on an incompatible native base before starting any AUR build.
             // The existing runner aborts the queue on the first non-zero exit.
             commands.push(repo_install_command(&settings, Vec::new()));
+            native_upgraded = true;
         }
         if let Some(cmd) = command_for_action(action, &settings) {
             commands.push(cmd);
@@ -213,6 +218,19 @@ mod tests {
         assert_eq!(aur.program, "paru");
         // aur/ keeps paru from picking a repo package that provides the name.
         assert_eq!(&aur.args[..4], ["-Syu", "--needed", "--noconfirm", "aur/localsend-bin"]);
+    }
+
+    #[test]
+    fn one_native_upgrade_covers_later_aur_builds() {
+        let queue = TransactionQueue { actions: vec![
+            action(PackageSource::Repo, ActionKind::Install, "htop"),
+            action(PackageSource::Aur, ActionKind::Install, "pfetch"),
+            action(PackageSource::Aur, ActionKind::Install, "localsend-bin"),
+        ] };
+        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        let programs: Vec<_> = plan.commands.iter().map(|command| command.program.as_str()).collect();
+        assert_eq!(programs, ["pkexec", "paru", "paru"]);
+        assert!(plan.commands[0].args.iter().any(|arg| arg == "htop"));
     }
 
     #[test]
