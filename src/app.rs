@@ -25,6 +25,8 @@ impl AuroraApp {
     }
 
     pub fn run(self) {
-        self.app.run();
+        // Own options (e.g. --updates) are handled in main; GApplication would
+        // otherwise treat them as files to open.
+        self.app.run_with_args(&std::env::args().take(1).collect::<Vec<_>>());
     }
 }

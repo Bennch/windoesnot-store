@@ -66,13 +66,22 @@ fn prepare(copy: &Path, system: &Path) -> Result<()> {
     if fs::symlink_metadata(&local).is_err() {
         std::os::unix::fs::symlink(system.join("local"), &local)?;
     }
-    if !has_sync_data(copy) {
-        if let Ok(entries) = fs::read_dir(system.join("sync")) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "db") {
-                    let _ = fs::copy(&path, sync.join(entry.file_name()));
-                }
+    let seed = !has_sync_data(copy);
+    if let Ok(entries) = fs::read_dir(system.join("sync")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if seed && name.ends_with(".db") {
+                let _ = fs::copy(&path, sync.join(&name));
+            }
+            // Repositories with required database signatures need the .sig next
+            // to the database; pacman does not refetch it for an unchanged
+            // database, and one invalid database fails every query. Take the
+            // matching pair from the system when the copy lacks the signature.
+            if name.ends_with(".db.sig") && !sync.join(&name).exists() {
+                let database = name.trim_end_matches(".sig");
+                let _ = fs::copy(system.join("sync").join(database), sync.join(database));
+                let _ = fs::copy(&path, sync.join(&name));
             }
         }
     }
@@ -120,16 +129,26 @@ mod tests {
         fs::create_dir_all(system.join("sync")).unwrap();
         fs::write(system.join("sync/extra.db"), b"db").unwrap();
         fs::write(system.join("sync/extra.files"), b"files").unwrap();
+        fs::write(system.join("sync/signed.db"), b"system db").unwrap();
+        fs::write(system.join("sync/signed.db.sig"), b"sig").unwrap();
 
         prepare(&copy, &system).unwrap();
         assert_eq!(fs::read_link(copy.join("local")).unwrap(), system.join("local"));
         assert!(copy.join("sync/extra.db").is_file());
+        assert!(copy.join("sync/signed.db.sig").is_file(), "signatures are seeded");
         assert!(!copy.join("sync/extra.files").exists(), "only sync databases are seeded");
         assert!(has_sync_data(&copy));
         assert!(is_fresh(&copy.join("sync"), MAX_AGE));
         assert!(!is_fresh(&copy.join("sync"), Duration::ZERO));
         // Preparing again keeps the existing copy and link.
         prepare(&copy, &system).unwrap();
+        // A copy without the signature (made by an older version) gets the
+        // matching database and signature from the system.
+        fs::write(copy.join("sync/signed.db"), b"refreshed db").unwrap();
+        fs::remove_file(copy.join("sync/signed.db.sig")).unwrap();
+        prepare(&copy, &system).unwrap();
+        assert_eq!(fs::read(copy.join("sync/signed.db")).unwrap(), b"system db");
+        assert!(copy.join("sync/signed.db.sig").is_file());
         let _ = fs::remove_dir_all(root);
     }
 

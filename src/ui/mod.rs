@@ -560,6 +560,10 @@ pub fn build_ui(app: &adw::Application) {
             }
         }
     });
+    // Opened from the desktop settings with --updates.
+    if START_PAGE.get() == Some(&"updates") {
+        sidebar.select_row(sidebar.row_at_index(3).as_ref());
+    }
 
     updates_page.connect_apply_all(clone!(@strong queue_controller => move || {
         queue_controller.add_upgrade_all();
@@ -586,6 +590,8 @@ pub fn build_ui(app: &adw::Application) {
     window.present();
 }
 
+/// Page to show at start, set by main from the command line.
+pub static START_PAGE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 static SEARCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, handles: UiHandles) {
