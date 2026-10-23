@@ -1,4 +1,5 @@
 pub mod appstream;
+pub mod aur_review;
 pub mod classify;
 pub mod cache;
 pub mod icons;

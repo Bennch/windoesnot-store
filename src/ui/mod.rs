@@ -28,6 +28,7 @@ use crate::core::runner::{CommandRunner, LogEvent, RunningHandle};
 use crate::core::transactions::{all_upgrade_actions, plan_transactions, TransactionPlan};
 use crate::i18n::{t, tf};
 
+pub mod aur_review;
 pub mod details;
 pub mod home;
 pub mod home_data;
@@ -241,6 +242,16 @@ impl QueueController {
             remove.add_css_class("flat");
             remove.set_valign(gtk::Align::Center);
             remove.set_tooltip_text(Some(t("Remove from queue")));
+            // A single AUR package can be looked at before it is built.
+            let check = (action.source == PackageSource::Aur && action.kind != ActionKind::Remove && action.name != "aur").then(|| {
+                let check = gtk::Button::with_label(t("Check"));
+                check.add_css_class("flat");
+                check.set_valign(gtk::Align::Center);
+                check.set_tooltip_text(Some(t("Show build instructions and hints")));
+                let (dialog_for_check, name) = (dialog.clone(), action.name.clone());
+                check.connect_clicked(move |_| aur_review::show(&dialog_for_check, name.clone()));
+                check
+            });
             let (controller, content_for_row, row_for_remove, dialog_for_row, action) =
                 (self.clone(), content.clone(), row.clone(), dialog.clone(), action.clone());
             remove.connect_clicked(move |_| {
@@ -256,6 +267,9 @@ impl QueueController {
                 }
             });
             row.append(&label);
+            if let Some(check) = &check {
+                row.append(check);
+            }
             row.append(&remove);
             content.append(&row);
         }
