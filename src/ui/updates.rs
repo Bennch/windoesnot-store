@@ -45,9 +45,9 @@ impl UpdatesPage {
         title.set_xalign(0.0);
         root.append(&title);
 
-        let info = gtk::Label::new(Some(
+        let info = gtk::Label::new(Some(t(
             "Check and apply updates. System upgrades run through the helper.",
-        ));
+        )));
         info.add_css_class("dim-label");
         info.set_wrap(true);
         info.set_xalign(0.0);
