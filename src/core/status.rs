@@ -13,6 +13,7 @@ pub struct PendingUpdate {
     pub name: String,
     pub old: String,
     pub new: String,
+    pub source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,9 +60,13 @@ pub struct Status {
     pub reboot: bool,
     /// Hyprland or Quickshell were replaced while running.
     pub relogin: bool,
+    pub aur_enabled: bool,
+    pub aur_available: bool,
+    pub aur_error: Option<String>,
 }
 
 pub fn collect(refresh: bool) -> Status {
+    let settings = crate::core::cache::load_settings();
     if refresh {
         if let Err(err) = crate::core::syncdb::refresh_now() {
             eprintln!("windoesnot-store: package databases not refreshed: {err}");
@@ -71,17 +76,30 @@ pub fn collect(refresh: bool) -> Status {
         Ok(items) => (items.iter().map(entry).collect(), false),
         Err(_) => (Vec::new(), true),
     };
+    let mut updates = pending_updates();
+    let mut aur_error = None;
+    if settings.aur_available() {
+        if let Some(helper) = settings.aur_helper.installed() {
+            match pending_aur_updates(helper.as_str()) {
+                Ok(aur) => updates.extend(aur),
+                Err(error) => aur_error = Some(error.to_string()),
+            }
+        }
+    }
     Status {
         windoesnot: windoesnot(),
         checked: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
-        updates: pending_updates(),
+        updates,
         news,
         news_unavailable,
         reboot: kernel_replaced(Path::new("/proc/sys/kernel/osrelease"), Path::new("/usr/lib/modules")),
         relogin: session_replaced(),
+        aur_enabled: settings.aur_enabled,
+        aur_available: settings.aur_available(),
+        aur_error,
     }
 }
 
@@ -184,11 +202,34 @@ fn pending_updates() -> Vec<PendingUpdate> {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
-    parse_pending(&output)
+    parse_pending_with_source(&output, "repo")
+}
+
+pub fn pending_aur_updates(helper: &str) -> anyhow::Result<Vec<PendingUpdate>> {
+    // Coreutils timeout bounds helper/network hangs, including child processes.
+    let output = Command::new("timeout")
+        .args(["--kill-after=2s", "20s", helper, "-Qua"])
+        .env("LC_ALL", "C")
+        .output()?;
+    parse_aur_output(output.status.code(), &output.stdout, &output.stderr)
+}
+
+fn parse_aur_output(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> anyhow::Result<Vec<PendingUpdate>> {
+    let out = String::from_utf8_lossy(stdout);
+    let error = String::from_utf8_lossy(stderr);
+    if code == Some(0) || (code == Some(1) && out.trim().is_empty() && error.trim().is_empty()) {
+        return Ok(parse_pending_with_source(&out, "aur"));
+    }
+    if matches!(code, Some(124 | 137)) { anyhow::bail!("AUR update check timed out"); }
+    anyhow::bail!("AUR update check failed: {}", error.trim());
 }
 
 /// `pacman -Qu` lines: "name old -> new" (ignored packages end with "[ignored]").
 fn parse_pending(output: &str) -> Vec<PendingUpdate> {
+    parse_pending_with_source(output, "repo")
+}
+
+fn parse_pending_with_source(output: &str, source: &str) -> Vec<PendingUpdate> {
     output
         .lines()
         .filter_map(|line| {
@@ -197,7 +238,7 @@ fn parse_pending(output: &str) -> Vec<PendingUpdate> {
             let old = parts.next()?.to_string();
             (parts.next()? == "->").then_some(())?;
             let new = parts.next()?.to_string();
-            Some(PendingUpdate { name, old, new })
+            Some(PendingUpdate { name, old, new, source: source.to_string() })
         })
         .collect()
 }
@@ -228,11 +269,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn aur_failure_is_not_reported_as_no_updates() {
+        assert!(parse_aur_output(Some(0), b"", b"").unwrap().is_empty());
+        assert!(parse_aur_output(Some(1), b"", b"").unwrap().is_empty());
+        assert!(parse_aur_output(Some(1), b"", b"network unavailable").is_err());
+        assert!(parse_aur_output(Some(124), b"", b"").is_err());
+        let rows = parse_aur_output(Some(0), b"sample-bin 1.0 -> 1.1\n", b"").unwrap();
+        assert_eq!(rows[0].source, "aur");
+    }
+
+    #[test]
     fn pacman_qu_lines_are_parsed() {
         let output = "linux-cachyos 7.2.7-1 -> 7.2.11-1\nhyprland 0.56.2-4 -> 0.57.0-1 [ignored]\nbroken line\n";
         let updates = parse_pending(output);
         assert_eq!(updates.len(), 2);
-        assert_eq!(updates[0], PendingUpdate { name: "linux-cachyos".into(), old: "7.2.7-1".into(), new: "7.2.11-1".into() });
+        assert_eq!(updates[0], PendingUpdate { name: "linux-cachyos".into(), old: "7.2.7-1".into(), new: "7.2.11-1".into(), source: "repo".into() });
     }
 
     #[test]

@@ -22,10 +22,19 @@ pub fn all_upgrade_actions(aur_available: bool, flatpak_available: bool) -> Vec<
 }
 
 pub fn plan_transactions(queue: &TransactionQueue, settings: &Settings) -> Result<TransactionPlan> {
-    plan_with_helper(queue, settings, settings.aur_helper.installed())
+    let mut current = settings.clone();
+    // Re-read immediately before execution: a desktop toggle may have changed
+    // since the review dialog opened. Removal of existing apps remains allowed.
+    current.aur_enabled = crate::core::cache::load_settings().aur_enabled;
+    plan_with_helper(queue, &current, current.aur_helper.installed())
 }
 
 fn plan_with_helper(queue: &TransactionQueue, settings: &Settings, helper: Option<AurHelperKind>) -> Result<TransactionPlan> {
+    if !settings.aur_enabled && queue.actions.iter().any(|action|
+        action.source == PackageSource::Aur && action.kind != ActionKind::Remove)
+    {
+        return Err(anyhow!(crate::i18n::t("AUR is disabled. Enable it in Settings before installing or updating AUR packages.")));
+    }
     let mut settings = settings.clone();
     if queue.actions.iter().any(|action| action.source == PackageSource::Aur) {
         settings.aur_helper = helper.ok_or_else(|| anyhow!(crate::i18n::t(
@@ -219,6 +228,19 @@ fn helper_path() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn enabled_settings() -> Settings { Settings { aur_enabled: true, ..Settings::default() } }
+
+    #[test]
+    fn disabled_aur_rejects_stale_install_queue_but_allows_removal() {
+        let queue = TransactionQueue { actions: vec![
+            action(PackageSource::Repo, ActionKind::Install, "htop"),
+            action(PackageSource::Aur, ActionKind::Install, "pfetch"),
+        ] };
+        assert!(plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).is_err());
+        let removal = TransactionQueue { actions: vec![action(PackageSource::Aur, ActionKind::Remove, "pfetch")] };
+        assert!(plan_with_helper(&removal, &Settings::default(), Some(AurHelperKind::Paru)).is_ok());
+    }
+
 
     fn action(source: PackageSource, kind: ActionKind, name: &str) -> TransactionAction {
         TransactionAction { name: name.into(), source, kind, origin: None }
@@ -232,7 +254,7 @@ mod tests {
             action(PackageSource::Repo, ActionKind::Install, "vlc"),
             action(PackageSource::Repo, ActionKind::Install, "firefox"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), None).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), None).unwrap();
         assert_eq!(plan.commands.len(), 1);
         let cmd = &plan.commands[0];
         assert_eq!(cmd.program, "pkexec");
@@ -246,7 +268,7 @@ mod tests {
             action(PackageSource::Repo, ActionKind::Remove, "vlc"),
             action(PackageSource::Repo, ActionKind::Install, "gimp"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), None).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), None).unwrap();
         assert_eq!(plan.commands.len(), 3);
         assert_eq!(plan.commands[0].args[2], "-Syu");
         assert_eq!(plan.commands[1].args[2], "-Rns");
@@ -258,7 +280,7 @@ mod tests {
         let queue = TransactionQueue { actions: vec![
             action(PackageSource::Aur, ActionKind::Install, "localsend-bin"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Yay)).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), Some(AurHelperKind::Yay)).unwrap();
         assert_eq!(plan.commands.len(), 2);
         assert_eq!(plan.commands[0].program, "pkexec");
         assert_eq!(plan.commands[0].args[2], "-Syu");
@@ -275,7 +297,7 @@ mod tests {
             action(PackageSource::Aur, ActionKind::Install, "pfetch"),
             action(PackageSource::Aur, ActionKind::Install, "localsend-bin"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Yay)).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), Some(AurHelperKind::Yay)).unwrap();
         let programs: Vec<_> = plan.commands.iter().map(|command| command.program.as_str()).collect();
         assert_eq!(programs, ["pkexec", "yay", "yay"]);
         assert!(plan.commands[0].args.iter().any(|arg| arg == "htop"));
@@ -289,7 +311,7 @@ mod tests {
             action(PackageSource::Repo, ActionKind::Upgrade, "system"),
             action(PackageSource::Aur, ActionKind::Install, "pfetch"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), Some(AurHelperKind::Paru)).unwrap();
         assert_eq!(plan.commands.len(), 1);
         let paru = &plan.commands[0];
         assert_eq!(paru.program, "paru");
@@ -304,7 +326,7 @@ mod tests {
             action(PackageSource::Aur, ActionKind::Install, "pfetch"),
             action(PackageSource::Flatpak, ActionKind::Install, "org.gimp.GIMP"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), Some(AurHelperKind::Paru)).unwrap();
         let programs: Vec<_> = plan.commands.iter().map(|command| command.program.as_str()).collect();
         assert_eq!(programs, ["pkexec", "paru", "flatpak"]);
         assert_eq!(plan.commands[0].args[2], "-Rns");
@@ -315,7 +337,7 @@ mod tests {
         let queue = TransactionQueue { actions: vec![
             action(PackageSource::Aur, ActionKind::Remove, "localsend-bin"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Paru)).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), Some(AurHelperKind::Paru)).unwrap();
         let aur = plan.commands.iter().find(|command| command.program == "paru").unwrap();
         assert!(aur.args.iter().any(|arg| arg == "localsend-bin"));
         assert!(!aur.args.iter().any(|arg| arg.starts_with("aur/")));
@@ -326,7 +348,7 @@ mod tests {
         let queue = TransactionQueue { actions: vec![
             action(PackageSource::Aur, ActionKind::Upgrade, "all"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), Some(AurHelperKind::Yay)).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), Some(AurHelperKind::Yay)).unwrap();
         assert_eq!(plan.commands[1].program, "yay");
         assert!(!plan.commands[1].args.iter().any(|arg| arg == "all"));
     }
@@ -337,7 +359,7 @@ mod tests {
             action(PackageSource::Repo, ActionKind::Install, "firefox"),
             action(PackageSource::Aur, ActionKind::Install, "localsend-bin"),
         ] };
-        assert!(plan_with_helper(&queue, &Settings::default(), None).is_err());
+        assert!(plan_with_helper(&queue, &enabled_settings(), None).is_err());
     }
 
     #[test]
@@ -345,7 +367,7 @@ mod tests {
         let queue = TransactionQueue { actions: vec![
             action(PackageSource::Flatpak, ActionKind::Install, "org.videolan.VLC"),
         ] };
-        let plan = plan_with_helper(&queue, &Settings::default(), None).unwrap();
+        let plan = plan_with_helper(&queue, &enabled_settings(), None).unwrap();
         assert_eq!(plan.commands.len(), 1);
         assert_eq!(plan.commands[0].program, "flatpak");
     }
@@ -355,7 +377,7 @@ mod tests {
         let actions = all_upgrade_actions(false, false);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].source, PackageSource::Repo);
-        assert!(plan_with_helper(&TransactionQueue { actions }, &Settings::default(), None).is_ok());
+        assert!(plan_with_helper(&TransactionQueue { actions }, &enabled_settings(), None).is_ok());
         assert_eq!(all_upgrade_actions(true, true).len(), 3);
     }
 

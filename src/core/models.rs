@@ -266,6 +266,13 @@ pub struct Settings {
     pub theme: ThemeMode,
     pub terminal_mode: TerminalMode,
     pub terminal_emulator: TerminalEmulator,
+    pub aur_enabled: bool,
+}
+
+impl Settings {
+    pub fn aur_available(&self) -> bool {
+        self.aur_enabled && self.aur_helper.installed().is_some()
+    }
 }
 
 impl Default for Settings {
@@ -276,6 +283,7 @@ impl Default for Settings {
             theme: ThemeMode::System,
             terminal_mode: TerminalMode::Integrated,
             terminal_emulator: TerminalEmulator::Auto,
+            aur_enabled: false,
         }
     }
 }

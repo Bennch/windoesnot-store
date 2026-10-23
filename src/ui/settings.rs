@@ -13,6 +13,7 @@ pub struct SettingsPage {
     theme_row: adw::ComboRow,
     terminal_mode_row: adw::ComboRow,
     terminal_emulator_row: adw::ComboRow,
+    aur_switch: adw::SwitchRow,
     helper_row: adw::ComboRow,
     noconfirm_row: adw::SwitchRow,
     clear_cache: gtk::Button,
@@ -62,6 +63,10 @@ impl SettingsPage {
         let group = adw::PreferencesGroup::new();
         group.set_title(t("General"));
 
+        let aur_switch = adw::SwitchRow::new();
+        aur_switch.set_title(t("Enable AUR"));
+        aur_switch.set_subtitle(t("Search and install packages from the Arch User Repository"));
+
         let list = gtk::StringList::new(&["yay", "paru"]);
         let helper_row = adw::ComboRow::new();
         helper_row.set_title(t("AUR Helper"));
@@ -88,6 +93,7 @@ impl SettingsPage {
         about_row.set_activatable(false);
         about_group.add(&about_row);
 
+        group.add(&aur_switch);
         group.add(&helper_row);
         group.add(&noconfirm_row);
         cache_group.add(&cache_row);
@@ -102,6 +108,7 @@ impl SettingsPage {
             theme_row,
             terminal_mode_row,
             terminal_emulator_row,
+            aur_switch,
             helper_row,
             noconfirm_row,
             clear_cache,
@@ -109,7 +116,8 @@ impl SettingsPage {
         }
     }
 
-    pub fn bind(&self, ctx: AppContext) {
+    pub fn bind(&self, ctx: AppContext, on_aur_changed: impl Fn() + 'static) {
+        let on_aur_changed = std::rc::Rc::new(on_aur_changed);
         let settings = ctx.settings.lock().unwrap().clone();
         self.theme_row.set_selected(settings.theme.to_index());
         self.terminal_mode_row
@@ -118,6 +126,8 @@ impl SettingsPage {
             .set_selected(settings.terminal_emulator.to_index());
         self.terminal_emulator_row
             .set_sensitive(settings.terminal_mode == TerminalMode::External);
+        self.aur_switch.set_active(settings.aur_enabled);
+        self.helper_row.set_sensitive(settings.aur_enabled);
         match settings.aur_helper {
             AurHelperKind::Yay => self.helper_row.set_selected(0),
             AurHelperKind::Paru => self.helper_row.set_selected(1),
@@ -157,6 +167,46 @@ impl SettingsPage {
                 settings.terminal_emulator = TerminalEmulator::from_index(selected);
                 let _ = save_settings(&settings);
             });
+
+        let ctx_clone = ctx.clone();
+        let helper_row_clone = self.helper_row.clone();
+        let on_change = on_aur_changed.clone();
+        self.aur_switch.connect_active_notify(move |row| {
+            let active = row.is_active();
+            let previous = ctx_clone.settings.lock().unwrap().aur_enabled;
+            if previous == active { return; }
+            if let Err(error) = crate::core::cache::set_aur_enabled(active) {
+                row.set_subtitle(&error.to_string());
+                row.set_active(previous);
+                return;
+            }
+            ctx_clone.settings.lock().unwrap().aur_enabled = active;
+            helper_row_clone.set_sensitive(active);
+            row.set_subtitle(t("Search and install packages from the Arch User Repository"));
+            on_change();
+        });
+
+        // Desktop settings run a separate CLI process. Watch the parent
+        // directory so atomic replacement of settings.json is handled as well.
+        let ctx_watch = ctx.clone();
+        let switch = self.aur_switch.downgrade();
+        let helper_row = self.helper_row.downgrade();
+        if let Ok(monitor) = crate::core::cache::watch_aur_setting(
+            &crate::core::cache::config_dir(), move |enabled| {
+                let Some(switch) = switch.upgrade() else { return };
+                let changed = {
+                    let mut current = ctx_watch.settings.lock().unwrap();
+                    let changed = current.aur_enabled != enabled;
+                    current.aur_enabled = enabled;
+                    changed
+                };
+                switch.set_active(enabled);
+                if let Some(row) = helper_row.upgrade() { row.set_sensitive(enabled); }
+                if changed { on_aur_changed(); }
+            })
+        {
+            self.root.connect_destroy(move |_| { monitor.cancel(); });
+        }
 
         let ctx_clone = ctx.clone();
         self.helper_row

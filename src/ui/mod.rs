@@ -181,7 +181,7 @@ impl QueueController {
     }
 
     pub fn add_upgrade_all(&self) {
-        let aur_available = self.ctx.settings.lock().unwrap().aur_helper.installed().is_some();
+        let aur_available = self.ctx.settings.lock().unwrap().aur_available();
         let flatpak_available = crate::core::cache::command_exists("flatpak");
         let mut queue = self.ctx.queue.lock().unwrap();
         for action in all_upgrade_actions(aur_available, flatpak_available) {
@@ -640,7 +640,11 @@ pub fn build_ui(app: &adw::Application) {
     }));
 
     updates_page.bind(ctx.clone());
-    settings_page.bind(ctx.clone());
+    let aur_updates = updates_page.clone();
+    let aur_context = ctx.clone();
+    settings_page.bind(ctx.clone(), move || {
+        aur_updates.refresh(aur_context.clone(), None);
+    });
     search_page.bind_search(ctx.clone(), handles.clone(), stack.clone());
     home_page.bind(ctx.clone(), handles.clone());
 
@@ -672,6 +676,7 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
             .flatpak_available
             .lock()
             .unwrap();
+        let aur_enabled = ctx_thread.settings.lock().unwrap().aur_available();
 
         // Pull the providers and caches we need into locals so the
         // `move` closures below can capture them without dragging
@@ -693,14 +698,16 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
                 let _ = tx_p.send(SearchChunk::Pacman(result));
             });
 
-            // AUR search
-            let tx_a = chunk_tx.clone();
-            let aur_provider_c = aur_provider.clone();
-            let query_c = query.clone();
-            s.spawn(move || {
-                let result = aur_provider_c.search(&query_c).unwrap_or_default();
-                let _ = tx_a.send(SearchChunk::Aur(result));
-            });
+            // AUR search (skipped if AUR is disabled)
+            if aur_enabled {
+                let tx_a = chunk_tx.clone();
+                let aur_provider_c = aur_provider.clone();
+                let query_c = query.clone();
+                s.spawn(move || {
+                    let result = aur_provider_c.search(&query_c).unwrap_or_default();
+                    let _ = tx_a.send(SearchChunk::Aur(result));
+                });
+            }
 
             // Flatpak search (skipped if flatpak isn't installed)
             if flatpak_enabled {
@@ -718,7 +725,7 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
 
         // 2) Collect chunks until all expected providers have reported
         //    in (or the channel closes for some other reason).
-        let expected = if flatpak_enabled { 3 } else { 2 };
+        let expected = 1 + usize::from(aur_enabled) + usize::from(flatpak_enabled);
         let mut pacman_results = Vec::new();
         let mut aur_results = Vec::new();
         let mut flatpak_results = Vec::new();

@@ -20,6 +20,8 @@ pub struct UpdatesPage {
     apply_selected_button: gtk::Button,
     list: gtk::ListBox,
     status: gtk::Label,
+    error_label: gtk::Label,
+    generation: Rc<std::cell::Cell<u64>>,
     search: gtk::SearchEntry,
     source_filter: gtk::DropDown,
     rows: Rc<RefCell<Vec<(gtk::CheckButton, TransactionAction, String)>>>,
@@ -55,6 +57,12 @@ impl UpdatesPage {
         status.add_css_class("dim-label");
         status.set_xalign(0.0);
         root.append(&status);
+        let error_label = gtk::Label::new(None);
+        error_label.set_wrap(true);
+        error_label.set_xalign(0.0);
+        error_label.add_css_class("error");
+        error_label.set_visible(false);
+        root.append(&error_label);
 
         let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some(t("Filter updates")));
@@ -103,6 +111,8 @@ impl UpdatesPage {
             apply_selected_button,
             list,
             status,
+            error_label,
+            generation: Rc::new(std::cell::Cell::new(0)),
             search,
             source_filter,
             rows: Rc::new(RefCell::new(Vec::new())),
@@ -133,7 +143,13 @@ impl UpdatesPage {
         let all_updates = self.all_updates.clone();
         let search = self.search.clone();
         let source_filter = self.source_filter.clone();
+        let generation = self.generation.clone();
+        let error_label = self.error_label.clone();
         self.check_button.connect_clicked(move |_| {
+            let generation = generation.clone();
+            generation.set(generation.get() + 1);
+            let request = generation.get();
+            let error_label = error_label.clone();
             let list = list.clone();
             let status = status.clone();
             let rows = rows.clone();
@@ -153,7 +169,10 @@ impl UpdatesPage {
 
             glib::idle_add_local(move || {
                 match rx.try_recv() {
-                    Ok(items) => {
+                    Ok((items, error)) => {
+                        if generation.get() != request { return glib::ControlFlow::Break; }
+                        error_label.set_visible(error.is_some());
+                        error_label.set_text(error.as_deref().unwrap_or(""));
                         *all_updates.borrow_mut() = items;
                         render_updates(
                             &list,
@@ -202,6 +221,10 @@ impl UpdatesPage {
     }
 
     pub fn refresh(&self, ctx: AppContext, notify: Option<adw::ToastOverlay>) {
+        let generation = self.generation.clone();
+        generation.set(generation.get() + 1);
+        let request = generation.get();
+        let error_label = self.error_label.clone();
         let list = self.list.clone();
         let status = self.status.clone();
         let rows = self.rows.clone();
@@ -216,7 +239,10 @@ impl UpdatesPage {
 
         let notify = notify.clone();
         glib::idle_add_local(move || match rx.try_recv() {
-            Ok(items) => {
+            Ok((items, error)) => {
+                if generation.get() != request { return glib::ControlFlow::Break; }
+                error_label.set_visible(error.is_some());
+                error_label.set_text(error.as_deref().unwrap_or(""));
                 *all_updates.borrow_mut() = items;
                 render_updates(
                     &list,
@@ -260,12 +286,18 @@ impl UpdatesPage {
     }
 }
 
-fn collect_updates(ctx: &AppContext) -> Vec<(TransactionAction, String)> {
+fn collect_updates(ctx: &AppContext) -> (Vec<(TransactionAction, String)>, Option<String>) {
+    let mut error = None;
     let mut items = Vec::new();
     items.extend(collect_pacman_updates());
-    items.extend(collect_aur_updates(ctx));
+    if ctx.settings.lock().map(|s| s.aur_available()).unwrap_or(false) {
+        match collect_aur_updates(ctx) {
+            Ok(aur) => items.extend(aur),
+            Err(_) => error = Some(t("AUR updates could not be checked. Please try again later.").to_string()),
+        }
+    }
     items.extend(collect_flatpak_updates());
-    items
+    (items, error)
 }
 
 fn render_updates(
@@ -406,36 +438,15 @@ fn collect_pacman_updates() -> Vec<(TransactionAction, String)> {
         .collect()
 }
 
-fn collect_aur_updates(ctx: &AppContext) -> Vec<(TransactionAction, String)> {
-    let helper = match ctx.settings.lock() {
-        Ok(settings) => settings.aur_helper,
-        Err(_) => AurHelperKind::Yay,
-    };
-    let Some(helper) = helper.installed() else { return Vec::new(); };
-    let output = Command::new(helper.as_str())
-        .args(["-Qua"])
-        .env("LC_ALL", "C")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default();
-
-    output
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|line| {
-            let name = line.split_whitespace().next().unwrap_or("").to_string();
-            (
-                TransactionAction {
-                    name,
-                    source: PackageSource::Aur,
-                    kind: ActionKind::Install,
-                    origin: None,
-                },
-                format!("{line} (AUR)"),
-            )
-        })
-        .collect()
+fn collect_aur_updates(ctx: &AppContext) -> anyhow::Result<Vec<(TransactionAction, String)>> {
+    let helper = ctx.settings.lock().map(|s| s.aur_helper).unwrap_or(AurHelperKind::Yay);
+    let Some(helper) = helper.installed() else { return Ok(Vec::new()); };
+    let updates = crate::core::status::pending_aur_updates(helper.as_str())?;
+    Ok(updates.into_iter().map(|update| {
+        let display = format!("{} {} → {} (AUR)", update.name, update.old, update.new);
+        (TransactionAction { name: update.name, source: PackageSource::Aur,
+            kind: ActionKind::Install, origin: None }, display)
+    }).collect())
 }
 
 fn collect_flatpak_updates() -> Vec<(TransactionAction, String)> {

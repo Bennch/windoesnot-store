@@ -46,6 +46,124 @@ pub fn save_settings(settings: &Settings) -> Result<()> {
     Ok(())
 }
 
+/// This command is deliberately separate from update checking: toggling AUR
+/// only changes a user preference, never refreshes pacman's system database.
+pub fn aur_cli_value(args: &[String]) -> Result<Option<bool>> {
+    if !args.iter().any(|arg| matches!(arg.as_str(), "--set-aur" | "--enable-aur" | "--disable-aur")) {
+        return Ok(None);
+    }
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["--enable-aur"] | ["--set-aur", "true" | "1" | "on"] => Ok(Some(true)),
+        ["--disable-aur"] | ["--set-aur", "false" | "0" | "off"] => Ok(Some(false)),
+        _ => anyhow::bail!("Usage: windoesnot-store --set-aur true|false"),
+    }
+}
+
+pub fn set_aur_enabled(enabled: bool) -> Result<()> {
+    update_aur_file(&config_dir().join("settings.json"), enabled)
+}
+
+fn update_aur_file(path: &std::path::Path, enabled: bool) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut value = match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(error.into()),
+    };
+    let object = value.as_object_mut().ok_or_else(|| anyhow::anyhow!("Settings must be a JSON object"))?;
+    object.insert("aur_enabled".into(), enabled.into());
+    fs::create_dir_all(path.parent().unwrap())?;
+    let temporary = path.with_extension(format!("aur-{}.tmp", std::process::id()));
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+    let result = (|| -> Result<()> {
+        file.write_all(&serde_json::to_vec_pretty(&value)?)?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() { let _ = fs::remove_file(&temporary); }
+    result
+}
+
+pub fn watch_aur_setting(directory: &std::path::Path, changed: impl Fn(bool) + 'static) -> Result<gio::FileMonitor> {
+    use gio::prelude::*;
+    fs::create_dir_all(directory)?;
+    let monitor = gio::File::for_path(directory).monitor_directory(
+        gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)?;
+    let path = directory.join("settings.json");
+    monitor.connect_changed(move |_, _, _, _| {
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                changed(value.get("aur_enabled").and_then(|v| v.as_bool()).unwrap_or(false));
+            }
+        }
+    });
+    Ok(monitor)
+}
+
+#[cfg(test)]
+mod aur_settings_tests {
+    use super::*;
+
+    #[test]
+    fn running_store_observes_atomic_external_toggle() {
+        use gio::prelude::*;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let dir = std::env::temp_dir().join(format!("wdn-aur-watch-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        update_aur_file(&path, false).unwrap();
+        let context = glib::MainContext::new();
+        context.with_thread_default(|| {
+            let seen = Rc::new(Cell::new(false));
+            let callback = seen.clone();
+            let monitor = watch_aur_setting(&dir, move |value| callback.set(value)).unwrap();
+            update_aur_file(&path, true).unwrap();
+            let start = Instant::now();
+            while !seen.get() && start.elapsed() < Duration::from_secs(3) {
+                context.iteration(false);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(seen.get(), "External atomic update must reach the running Store");
+            monitor.cancel();
+        }).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn explicit_aur_arguments_only() {
+        for value in ["true", "1", "on"] {
+            assert_eq!(aur_cli_value(&["--set-aur".into(), value.into()]).unwrap(), Some(true));
+        }
+        assert_eq!(aur_cli_value(&["--disable-aur".into()]).unwrap(), Some(false));
+        for args in [vec!["--set-aur"], vec!["--set-aur", "typo"], vec!["--enable-aur", "--disable-aur"]] {
+            assert!(aur_cli_value(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).is_err());
+        }
+        assert!(!Settings::default().aur_enabled);
+        let old: Settings = serde_json::from_str(r#"{"theme":"Dark"}"#).unwrap();
+        assert!(!old.aur_enabled);
+    }
+
+    #[test]
+    fn aur_toggle_preserves_other_settings_and_rejects_corruption() {
+        let dir = std::env::temp_dir().join(format!("wdn-aur-settings-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        fs::write(&path, r#"{"theme":"Dark","custom":{"keep":42},"aur_enabled":false}"#).unwrap();
+        update_aur_file(&path, true).unwrap();
+        let data: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(data["aur_enabled"], true);
+        assert_eq!(data["custom"]["keep"], 42);
+        assert_eq!(data["theme"], "Dark");
+        fs::write(&path, "broken json").unwrap();
+        assert!(update_aur_file(&path, false).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "broken json");
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 pub fn ensure_cache_dirs() -> Result<()> {
     fs::create_dir_all(screenshots_dir())?;
     Ok(())
