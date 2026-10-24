@@ -289,6 +289,24 @@ impl LogDrawer {
         self.cancel_btn.set_sensitive(self.on_cancel.borrow().is_some());
     }
 
+    pub fn toggle_button(&self) -> gtk::ToggleButton {
+        let button = gtk::ToggleButton::new();
+        let label = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        label.append(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
+        label.append(&gtk::Label::new(Some(t("Logs"))));
+        button.set_child(Some(&label));
+        button.set_active(self.is_visible());
+        let drawer = self.clone();
+        button.connect_toggled(move |button| drawer.set_visible(button.is_active()));
+        let weak = button.downgrade();
+        self.root.connect_visible_notify(move |drawer| {
+            if let Some(button) = weak.upgrade() {
+                button.set_active(drawer.is_visible());
+            }
+        });
+        button
+    }
+
     pub fn widget(&self) -> &gtk::Box {
         &self.root
     }
@@ -406,5 +424,29 @@ impl LogDrawer {
             }
         }
         "/usr/bin/windoesnot-store-helper".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display; run with a private Broadway display"]
+    fn toggle_reopens_closed_logs_and_follows_automatic_opening() {
+        gtk::init().expect("GTK display");
+        let drawer = LogDrawer::new();
+        let button = drawer.toggle_button();
+        assert!(!button.is_active());
+        button.set_active(true);
+        assert!(drawer.is_visible());
+        drawer.widget().set_visible(false);
+        assert!(!button.is_active());
+        button.set_active(true);
+        assert!(drawer.is_visible());
+        button.set_active(false);
+        assert!(!drawer.is_visible());
+        drawer.set_visible(true);
+        assert!(button.is_active());
     }
 }

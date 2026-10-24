@@ -427,10 +427,6 @@ pub fn build_ui(app: &adw::Application) {
     let queue_button = gtk::Button::with_label(t("Queue (0)"));
     queue_button.add_css_class("suggested-action");
     queue_button.add_css_class("queue-button");
-    queue_button.set_halign(gtk::Align::End);
-    queue_button.set_valign(gtk::Align::Start);
-    queue_button.set_margin_top(30);
-    queue_button.set_margin_end(30);
 
     let sidebar = gtk::ListBox::new();
     sidebar.add_css_class("navigation-sidebar");
@@ -509,12 +505,18 @@ pub fn build_ui(app: &adw::Application) {
     stack.set_visible_child_name("home");
 
     let nav_view = adw::NavigationView::new();
-    let stack_overlay = gtk::Overlay::new();
-    stack_overlay.set_child(Some(&stack));
-    stack_overlay.add_overlay(&queue_button);
+    let log_drawer = widgets::log_drawer::LogDrawer::new();
+    let log_toggle = log_drawer.toggle_button();
+    let header_actions = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    header_actions.set_halign(gtk::Align::End);
+    header_actions.set_valign(gtk::Align::Start);
+    header_actions.set_margin_top(30);
+    header_actions.set_margin_end(30);
+    header_actions.append(&log_toggle);
+    header_actions.append(&queue_button);
     let main_page = adw::NavigationPage::builder()
         .title("WinDoesNot Store")
-        .child(&stack_overlay)
+        .child(&stack)
         .build();
     nav_view.push(&main_page);
 
@@ -535,7 +537,6 @@ pub fn build_ui(app: &adw::Application) {
     split.set_content(Some(&content_page));
     sidebar.select_row(sidebar.row_at_index(0).as_ref());
 
-    let log_drawer = widgets::log_drawer::LogDrawer::new();
     let toast_overlay = adw::ToastOverlay::new();
 
     let queue_controller = QueueController::new(
@@ -572,6 +573,8 @@ pub fn build_ui(app: &adw::Application) {
     log_widget.set_valign(gtk::Align::End);
     content_overlay.add_overlay(&log_widget);
     content_overlay.set_measure_overlay(&log_widget, false);
+    // Keep both controls reachable on detail pages and above the expanded log panel.
+    content_overlay.add_overlay(&header_actions);
 
     toast_overlay.set_child(Some(&content_overlay));
     toast_overlay.set_hexpand(true);
