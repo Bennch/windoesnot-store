@@ -19,6 +19,7 @@ pub struct SearchPage {
     state_filter: gtk::DropDown,
     results: gtk::FlowBox,
     status: gtk::Label,
+    source_hint: gtk::Label,
     show_more_btn: gtk::Button,
     all_results: Rc<RefCell<Vec<PackageSummary>>>,
     result_limit: Rc<RefCell<usize>>,
@@ -57,6 +58,13 @@ impl SearchPage {
         controls.append(&state_filter);
         root.append(&controls);
 
+        let source_hint = gtk::Label::new(None);
+        source_hint.set_xalign(0.0);
+        source_hint.set_wrap(true);
+        source_hint.add_css_class("dim-label");
+        source_hint.set_visible(false);
+        root.append(&source_hint);
+
         let status = gtk::Label::new(Some(t("Type a package name to search.")));
         status.set_xalign(0.0);
         status.add_css_class("dim-label");
@@ -94,6 +102,7 @@ impl SearchPage {
             state_filter,
             results,
             status,
+            source_hint,
             show_more_btn,
             all_results: Rc::new(RefCell::new(Vec::new())),
             result_limit: Rc::new(RefCell::new(INITIAL_RESULT_LIMIT)),
@@ -101,6 +110,7 @@ impl SearchPage {
     }
 
     pub fn bind_search(&self, ctx: AppContext, handles: UiHandles, stack: gtk::Stack) {
+        self.update_source_hint(&ctx);
         let debounce: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
         let entry = self.entry.clone();
         let page = self.clone();
@@ -194,7 +204,30 @@ impl SearchPage {
         self.render_filtered(ctx, handles);
     }
 
+    pub(super) fn refresh_sources(&self, ctx: &AppContext, handles: &UiHandles) {
+        self.update_source_hint(ctx);
+        let query = self.entry.text().trim().to_string();
+        if !query.is_empty() {
+            self.reset_result_limit();
+            run_search(query, ctx.clone(), self.clone(), handles.clone());
+        }
+    }
+
+    fn update_source_hint(&self, ctx: &AppContext) {
+        let settings = ctx.settings.lock().unwrap();
+        let message = if !settings.aur_enabled {
+            t("AUR search is disabled. Enable AUR in Settings to include these packages.")
+        } else if !settings.aur_available() {
+            t("No AUR helper installed. Install paru or yay to use AUR.")
+        } else {
+            ""
+        };
+        self.source_hint.set_text(message);
+        self.source_hint.set_visible(!message.is_empty());
+    }
+
     fn render_filtered(&self, ctx: &AppContext, handles: &UiHandles) {
+        self.update_source_hint(ctx);
         self.clear_results();
 
         let selected_source = self.source_filter.selected();

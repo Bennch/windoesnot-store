@@ -31,6 +31,7 @@ const DE: &[(&str, &str)] = &[
     ("Search and install applications from repo and AUR.", "Programme aus den Paketquellen und dem AUR suchen und installieren."),
     ("Installed packages: {} (Pacman/AUR), {} Flatpak apps", "Installierte Pakete: {} (Pacman/AUR), {} Flatpak-Apps"),
     // Search
+    ("AUR search is disabled. Enable AUR in Settings to include these packages.", "Die AUR-Suche ist ausgeschaltet. Aktiviere AUR in den Einstellungen, um diese Pakete einzubeziehen."),
     ("Search packages", "Pakete suchen"),
     ("All Sources", "Alle Quellen"),
     ("All States", "Alle Zustände"),

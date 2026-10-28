@@ -675,7 +675,10 @@ pub fn build_ui(app: &adw::Application) {
     updates_page.bind(ctx.clone());
     let aur_updates = updates_page.clone();
     let aur_context = ctx.clone();
+    let aur_search = search_page.clone();
+    let aur_search_handles = handles.clone();
     settings_page.bind(ctx.clone(), move || {
+        aur_search.refresh_sources(&aur_context, &aur_search_handles);
         aur_updates.refresh(aur_context.clone(), None);
     });
     search_page.bind_search(ctx.clone(), handles.clone(), stack.clone());

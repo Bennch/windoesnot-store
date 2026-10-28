@@ -27,8 +27,16 @@ impl Flatpak {
                 continue;
             }
             let cols: Vec<&str> = line.split('\t').collect();
-            let app_id = cols.get(0).unwrap_or(&"").trim().to_string();
-            if app_id.is_empty() {
+            // Flatpak prints status messages (e.g. "No matches found") to
+            // stdout too. Only complete TSV rows with app IDs are packages.
+            if cols.len() < 5 {
+                continue;
+            }
+            let app_id = cols[0].trim().to_string();
+            if !crate::core::installation::looks_like_app_id(&app_id)
+                || app_id.split('.').any(|part| part.is_empty())
+                || !app_id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+            {
                 continue;
             }
             let summary = cols.get(1).unwrap_or(&"").trim().to_string();
@@ -60,8 +68,16 @@ impl Flatpak {
                 continue;
             }
             let cols: Vec<&str> = line.split('\t').collect();
-            let app_id = cols.get(0).unwrap_or(&"").trim().to_string();
-            if app_id.is_empty() {
+            // Flatpak prints status messages (e.g. "No matches found") to
+            // stdout too. Only complete TSV rows with app IDs are packages.
+            if cols.len() < 4 {
+                continue;
+            }
+            let app_id = cols[0].trim().to_string();
+            if !crate::core::installation::looks_like_app_id(&app_id)
+                || app_id.split('.').any(|part| part.is_empty())
+                || !app_id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+            {
                 continue;
             }
             let summary = cols.get(1).unwrap_or(&"").trim().to_string();
@@ -147,5 +163,31 @@ impl FlatpakProvider for Flatpak {
         let output =
             Self::run_capture(&["list", "--app", "--columns=application,description,version,branch"])?;
         Ok(Self::parse_list(&output))
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::Flatpak;
+
+    #[test]
+    fn status_messages_are_not_installable_search_results() {
+        for output in ["No matches found\n", "", "Warning: no remotes configured\n",
+                       "No matches found\t\t\t\t\n", "org..Invalid\tDescription\t1\tstable\tflathub\n"] {
+            assert!(Flatpak::parse_search(output).is_empty(), "{output:?}");
+        }
+    }
+
+    #[test]
+    fn real_flatpak_rows_survive_empty_version_and_status_lines() {
+        let output = "No matches found\norg.example.Player\tMusic player\t\tstable\tflathub\n";
+        let rows = Flatpak::parse_search(output);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "org.example.Player");
+        assert_eq!(rows[0].version, "stable");
+        assert_eq!(rows[0].origin.as_deref(), Some("flathub"));
+        assert!(Flatpak::parse_list("No installed applications\n").is_empty());
+        assert_eq!(Flatpak::parse_list("org.example.Player\tMusic player\t1.0\tstable\n").len(), 1);
     }
 }
