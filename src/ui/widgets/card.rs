@@ -12,7 +12,14 @@ where
     F: Fn() + 'static,
     G: Fn() + 'static,
 {
-    let (tile, button) = build_tile(&pkg.name, &pkg.name, None, &pkg.summary, Some(pkg.source.label()), on_action, on_details);
+    // Shown so the same app from two sources (e.g. an older pacman build vs.
+    // a newer AUR one) can be told apart at a glance, without opening both.
+    let badge = if pkg.version.is_empty() {
+        pkg.source.label().to_string()
+    } else {
+        format!("{} · {}", pkg.source.label(), pkg.version)
+    };
+    let (tile, button) = build_tile(&pkg.name, &pkg.name, None, &pkg.summary, Some(&badge), on_action, on_details);
     mark_installed(&button, pkg.installed_via.or(pkg.installed.then_some(pkg.source)));
     tile
 }
