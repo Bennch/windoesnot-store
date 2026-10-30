@@ -17,7 +17,6 @@ pub struct InstalledPage {
     search: gtk::SearchEntry,
     filter: gtk::DropDown,
     update_all: gtk::Button,
-    refresh_button: gtk::Button,
     loading: gtk::Box,
     spinner: gtk::Spinner,
     all: Rc<RefCell<Vec<PackageSummary>>>,
@@ -52,13 +51,10 @@ impl InstalledPage {
 
         let update_all = gtk::Button::with_label(t("Update All"));
         update_all.add_css_class("suggested-action");
-        let refresh_button = gtk::Button::from_icon_name("view-refresh-symbolic");
-        refresh_button.set_tooltip_text(Some(t("Refresh installed")));
 
         controls.append(&search);
         controls.append(&filter);
         controls.append(&update_all);
-        controls.append(&refresh_button);
         root.append(&controls);
 
         let loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -94,7 +90,6 @@ impl InstalledPage {
             search,
             filter,
             update_all,
-            refresh_button,
             loading,
             spinner,
             all: Rc::new(RefCell::new(Vec::new())),
@@ -105,8 +100,6 @@ impl InstalledPage {
     pub fn refresh(&self, ctx: AppContext, handles: UiHandles) {
         self.loading.set_visible(true);
         self.spinner.start();
-        self.refresh_button.set_sensitive(false);
-        let page = self.clone();
         let all_ref = self.all.clone();
         let (tx, rx) = mpsc::channel();
         let ctx_thread = ctx.clone();
@@ -121,7 +114,6 @@ impl InstalledPage {
         let search = self.search.clone();
         let filter = self.filter.clone();
         let update_all = self.update_all.clone();
-        let refresh_button = self.refresh_button.clone();
         let connected = self.connected.clone();
         let loading = self.loading.clone();
         let spinner = self.spinner.clone();
@@ -130,7 +122,6 @@ impl InstalledPage {
                 Ok(packages) => {
                     spinner.stop();
                     loading.set_visible(false);
-                    refresh_button.set_sensitive(true);
                     *all_ref.borrow_mut() = packages.clone();
                     render_list(&list, &packages, &handles, &ctx, 0, "");
                     if !connected.get() {
@@ -158,13 +149,6 @@ impl InstalledPage {
                             handles_for_btn.queue.add_upgrade_all();
                         });
 
-                        let ctx_for_refresh = ctx.clone();
-                        let handles_for_refresh = handles.clone();
-                        let page_for_refresh = page.clone();
-                        refresh_button.connect_clicked(move |_| {
-                            page_for_refresh.refresh(ctx_for_refresh.clone(), handles_for_refresh.clone());
-                        });
-
                         let all_for_filter = all_ref.clone();
                         let list_for_filter = list.clone();
                         let handles_for_filter = handles.clone();
@@ -189,7 +173,6 @@ impl InstalledPage {
                 Err(mpsc::TryRecvError::Disconnected) => {
                     spinner.stop();
                     loading.set_visible(false);
-                    refresh_button.set_sensitive(true);
                     glib::ControlFlow::Break
                 },
             }

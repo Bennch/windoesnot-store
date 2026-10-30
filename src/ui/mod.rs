@@ -629,6 +629,7 @@ pub fn build_ui(app: &adw::Application) {
     let handles_for_sidebar = handles.clone();
     let nav_for_sidebar = nav_view.clone();
     let main_page_for_sidebar = main_page.clone();
+    let updates_for_sidebar = updates_page.clone();
     // GTK re-emits row-selected for the current row when focus moves, e.g. when
     // a details page is pushed; returning to the main page then would close it
     // again at once. Only a changed selection switches pages here; clicking the
@@ -655,7 +656,10 @@ pub fn build_ui(app: &adw::Application) {
                     stack_for_sidebar.set_visible_child_name("installed");
                     installed_page.refresh(ctx_for_sidebar.clone(), handles_for_sidebar.clone());
                 }
-                3 => stack_for_sidebar.set_visible_child_name("updates"),
+                3 => {
+                    stack_for_sidebar.set_visible_child_name("updates");
+                    updates_for_sidebar.refresh(ctx_for_sidebar.clone(), Some(handles_for_sidebar.toasts.clone()));
+                }
                 4 => stack_for_sidebar.set_visible_child_name("settings"),
                 _ => {}
             }

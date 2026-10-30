@@ -14,7 +14,6 @@ use crate::i18n::{t, tf};
 #[derive(Clone)]
 pub struct UpdatesPage {
     pub root: gtk::Box,
-    check_button: gtk::Button,
     select_all_button: gtk::Button,
     clear_selection_button: gtk::Button,
     apply_button: gtk::Button,
@@ -81,7 +80,6 @@ impl UpdatesPage {
 
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         buttons.add_css_class("page-controls");
-        let check_button = gtk::Button::with_label(t("Check Updates"));
         let select_all_button = gtk::Button::with_label(t("Select All"));
         let clear_selection_button = gtk::Button::with_label(t("Select None"));
         let apply_selected_button = gtk::Button::with_label(t("Update Selected"));
@@ -89,7 +87,6 @@ impl UpdatesPage {
         // WinDoesNot: no per-package updates. Updating a subset (e.g. hyprutils alone)
         // is a partial upgrade and breaks plugins built against the exact Hyprland ABI.
         apply_button.add_css_class("suggested-action");
-        buttons.append(&check_button);
         buttons.append(&apply_button);
         root.append(&buttons);
 
@@ -111,7 +108,6 @@ impl UpdatesPage {
 
         Self {
             root,
-            check_button,
             select_all_button,
             clear_selection_button,
             apply_button,
@@ -143,72 +139,6 @@ impl UpdatesPage {
             for (check, _, _) in rows_for_clear.borrow().iter() {
                 check.set_active(false);
             }
-        });
-
-        let list = self.list.clone();
-        let status = self.status.clone();
-        let spinner = self.spinner.clone();
-        let rows = self.rows.clone();
-        let all_updates = self.all_updates.clone();
-        let search = self.search.clone();
-        let source_filter = self.source_filter.clone();
-        let generation = self.generation.clone();
-        let error_label = self.error_label.clone();
-        self.check_button.connect_clicked(move |_| {
-            spinner.set_visible(true);
-            spinner.start();
-            status.set_text(t("Checking for updates…"));
-            let generation = generation.clone();
-            generation.set(generation.get() + 1);
-            let request = generation.get();
-            let error_label = error_label.clone();
-            let list = list.clone();
-            let status = status.clone();
-            let spinner = spinner.clone();
-            let rows = rows.clone();
-            let all_updates = all_updates.clone();
-            let search = search.clone();
-            let source_filter = source_filter.clone();
-            let ctx = ctx.clone();
-            let (tx, rx) = mpsc::channel();
-            std::thread::spawn(move || {
-                // An explicit check refreshes the search copy regardless of its age.
-                if let Err(err) = crate::core::syncdb::refresh_now() {
-                    eprintln!("windoesnot-store: update check without fresh database: {err}");
-                }
-                let items = collect_updates(&ctx);
-                let _ = tx.send(items);
-            });
-
-            glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
-                match rx.try_recv() {
-                    Ok((items, error)) => {
-                        if generation.get() != request { return glib::ControlFlow::Break; }
-                        spinner.stop();
-                        spinner.set_visible(false);
-                        error_label.set_visible(error.is_some());
-                        error_label.set_text(error.as_deref().unwrap_or(""));
-                        *all_updates.borrow_mut() = items;
-                        render_updates(
-                            &list,
-                            &rows,
-                            &all_updates.borrow(),
-                            &search.text(),
-                            source_filter.selected(),
-                            &status,
-                        );
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        if generation.get() == request {
-                            spinner.stop();
-                            spinner.set_visible(false);
-                        }
-                        glib::ControlFlow::Break
-                    },
-                }
-            });
         });
 
         let list = self.list.clone();
@@ -258,6 +188,12 @@ impl UpdatesPage {
         let source_filter = self.source_filter.clone();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
+            // Refresh the search copy regardless of its age: this runs every
+            // time the Updates page is shown, so a stale cache would mean a
+            // visibly wrong "no updates" right after one was just installed.
+            if let Err(err) = crate::core::syncdb::refresh_now() {
+                eprintln!("windoesnot-store: update check without fresh database: {err}");
+            }
             let items = collect_updates(&ctx);
             let _ = tx.send(items);
         });
