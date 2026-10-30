@@ -9,9 +9,9 @@ use libadwaita as adw;
 use adw::prelude::*;
 
 use crate::core::appstream::AppStreamClient;
-use crate::core::models::{PackageDetails, PackageSource, PackageSummary};
+use crate::core::models::{PackageDetails, PackageSource, PackageSummary, TransactionAction};
 use crate::core::sources::{self, Lookups, SourceOption};
-use crate::ui::{AppContext, UiHandles};
+use crate::ui::{updates, AppContext, UiHandles};
 use crate::core::installation::Installation;
 use crate::ui::widgets::app_icon::app_icon;
 use crate::ui::widgets::screenshot_carousel::ScreenshotCarousel;
@@ -78,8 +78,12 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let open_home_btn = gtk::Button::with_label(t("Open Homepage"));
     open_home_btn.set_visible(false);
     let logs_btn = gtk::Button::with_label(t("View Logs"));
-    // Single-package updates are partial upgrades; updates run via "Update all".
+    let update_btn = gtk::Button::with_label(t("Update"));
+    update_btn.add_css_class("suggested-action");
+    update_btn.set_visible(false);
+    let pending_update: Rc<RefCell<Option<TransactionAction>>> = Rc::new(RefCell::new(None));
     button_row.append(&action_btn);
+    button_row.append(&update_btn);
     button_row.append(&open_home_btn);
     button_row.append(&logs_btn);
 
@@ -101,6 +105,25 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     details.append(&size);
     details.append(&homepage);
 
+    let update_status = gtk::Label::new(None);
+    update_status.set_xalign(0.0);
+    update_status.set_wrap(true);
+    update_status.set_visible(false);
+    details.append(&update_status);
+
+    let update_loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let update_spinner = gtk::Spinner::new();
+    update_loading.append(&update_spinner);
+    update_loading.append(&gtk::Label::new(Some(t("Checking for updates…"))));
+    update_loading.set_visible(false);
+    details.append(&update_loading);
+
+    let loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let spinner = gtk::Spinner::new();
+    spinner.start();
+    loading.append(&spinner);
+    loading.append(&gtk::Label::new(Some(t("Loading package information…"))));
+
     let description = gtk::Label::new(Some(""));
     description.set_xalign(0.0);
     description.set_wrap(true);
@@ -121,6 +144,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     root.append(&sources_heading);
     root.append(&sources_list);
     root.append(&button_row);
+    root.append(&loading);
     root.append(carousel.widget());
     root.append(&details);
     root.append(&description);
@@ -142,9 +166,16 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let description_clone = description.clone();
     let carousel_clone = carousel.clone();
     let action_btn_clone = action_btn.clone();
+    let update_loading_for_details = update_loading.clone();
+    let update_spinner_for_details = update_spinner.clone();
+    let update_btn_for_status = update_btn.clone();
+    let pending_update_for_status = pending_update.clone();
+    let loading_clone = loading.clone();
+    let spinner_clone = spinner.clone();
     let open_home_btn_clone = open_home_btn.clone();
     let homepage_clone = homepage.clone();
     let installations_clone = installations.clone();
+    let installations_clone_for_status = installations.clone();
     let home_url = Rc::new(RefCell::new(None::<String>));
     let home_url_clone = home_url.clone();
     let appstream = ctx.appstream.clone();
@@ -154,16 +185,26 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let sources_list_clone = sources_list.clone();
     let chosen_clone = chosen.clone();
     let (tx, rx) = mpsc::channel();
+    let (update_tx, update_rx) = mpsc::channel();
     std::thread::spawn(move || {
         let found = ctx_clone.installed_apps().find(&summary_clone.name, flatpak_id.as_deref());
         let options = source_options(&ctx_clone, &summary_clone, flatpak_id.as_deref());
-        let details = load_details(ctx_clone, summary_clone, appstream);
-        let _ = tx.send((details, found, options));
+        let details = load_details(ctx_clone.clone(), summary_clone, appstream);
+        let _ = tx.send((details, found.clone(), options));
+        let update = if found.is_empty() {
+            None
+        } else {
+            let (available, _) = updates::collect_updates(&ctx_clone);
+            updates::update_for_installations(&available, &found)
+        };
+        let _ = update_tx.send(update);
     });
 
-    glib::idle_add_local(move || {
+    glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
         match rx.try_recv() {
             Ok((details, found, options)) => {
+                spinner_clone.stop();
+                loading_clone.set_visible(false);
                 fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone);
                 sources_heading_clone.set_visible(!options.is_empty());
                 sources_list_clone.set_visible(!options.is_empty());
@@ -175,6 +216,10 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     None => t("Install").to_string(),
                 });
                 action_btn_clone.set_sensitive(true);
+                if !found.is_empty() {
+                    update_loading_for_details.set_visible(true);
+                    update_spinner_for_details.start();
+                }
                 *installations_clone.borrow_mut() = found;
                 if let Some(size) = &details.size {
                     size_clone.set_text(&tf("Size: {}", &[size]));
@@ -193,7 +238,42 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 glib::ControlFlow::Break
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                spinner_clone.stop();
+                loading_clone.set_visible(false);
+                glib::ControlFlow::Break
+            }
+        }
+    });
+
+    glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
+        match update_rx.try_recv() {
+            Ok(update) => {
+                update_spinner.stop();
+                update_loading.set_visible(false);
+                if let Some((action, description)) = update {
+                    let message = tf("Update available: {}", &[&description]);
+                    update_status.set_visible(true);
+                    if action.source == PackageSource::Flatpak {
+                        update_status.set_text(&message);
+                        *pending_update_for_status.borrow_mut() = Some(action);
+                        update_btn_for_status.set_visible(true);
+                    } else {
+                        update_status.set_text(&format!("{}\n{}", message,
+                            t("This system package can only be updated as part of a full system upgrade.")));
+                    }
+                } else if !installations_clone_for_status.borrow().is_empty() {
+                    update_status.set_text(t("No update found in current package data"));
+                    update_status.set_visible(true);
+                }
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                update_spinner.stop();
+                update_loading.set_visible(false);
+                glib::ControlFlow::Break
+            }
         }
     });
 
@@ -210,6 +290,14 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 None => queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone()),
             },
         }
+    });
+
+    let update_queue = handles.queue.clone();
+    let pending_update = pending_update.clone();
+    update_btn.connect_clicked(move |_| {
+        let Some(action) = pending_update.borrow().clone() else { return };
+        update_queue.add_upgrade_packages(vec![action]);
+        update_queue.show_review_dialog();
     });
 
     let home_url = home_url.clone();

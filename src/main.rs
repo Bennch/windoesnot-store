@@ -39,6 +39,11 @@ fn main() {
     } else if args.iter().any(|arg| arg == "--updates") {
         ui::START_PAGE.set("updates").ok();
     }
+    let open_desktop = args.get(1).is_some_and(|arg| arg == "--open-desktop");
+    if open_desktop && (args.len() != 3 || !args[2].ends_with(".desktop")) {
+        eprintln!("Usage: windoesnot-store --open-desktop /path/to/app.desktop");
+        std::process::exit(2);
+    }
     let app = app::AuroraApp::new();
-    app.run();
+    app.run(open_desktop);
 }

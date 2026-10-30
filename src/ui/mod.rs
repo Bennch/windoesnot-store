@@ -11,6 +11,8 @@ use glib::clone;
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::gdk;
+use gtk::gio;
+use glib::variant::StaticVariantType;
 use libadwaita as adw;
 use adw::prelude::*;
 
@@ -693,6 +695,38 @@ pub fn build_ui(app: &adw::Application) {
         ControlFlow::Continue
     });
 
+    // A Start-menu request may arrive while Store is already running. The
+    // application action is available after activation in either case.
+    let open_action = gio::SimpleAction::new("open-desktop", Some(&String::static_variant_type()));
+    let open_ctx = ctx.clone();
+    let open_handles = handles.clone();
+    let open_main_page = main_page.clone();
+    open_action.connect_activate(move |_, parameter| {
+        let Some(path) = parameter.and_then(|value| value.str()).map(str::to_owned) else { return };
+        let ctx = open_ctx.clone();
+        let handles = open_handles.clone();
+        let main_page = open_main_page.clone();
+        let (tx, rx) = mpsc::channel();
+        let worker_ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(installed_for_desktop(&worker_ctx, &path));
+        });
+        glib::timeout_add_local(Duration::from_millis(40), move || match rx.try_recv() {
+            Ok(Some(summary)) => {
+                let _ = handles.nav_view.pop_to_page(&main_page);
+                details::show_details(&ctx, &handles, summary, None);
+                ControlFlow::Break
+            }
+            Ok(None) => {
+                handles.toasts.add_toast(adw::Toast::new(t("This app is not managed by Store.")));
+                ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+        });
+    });
+    app.add_action(&open_action);
+
     window.present();
     if START_PAGE.get() == Some(&"upgrade") {
         let controller = queue_controller.clone();
@@ -706,6 +740,30 @@ pub fn build_ui(app: &adw::Application) {
 /// Page to show at start, set by main from the command line.
 pub static START_PAGE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 static SEARCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Resolve a launcher to an installed package. Never guess from the display
+/// name: translated names and unrelated packages can share that name.
+fn installed_for_desktop(ctx: &AppContext, path: &str) -> Option<PackageSummary> {
+    let desktop = Path::new(path);
+    if !desktop.is_absolute() || desktop.extension().and_then(|ext| ext.to_str()) != Some("desktop") || !desktop.is_file() {
+        return None;
+    }
+
+    if let Ok(output) = Command::new("pacman").args(["-Qoq", "--", path]).output() {
+        if output.status.success() {
+            let installed = ctx.pacman.list_installed().unwrap_or_default();
+            for name in String::from_utf8_lossy(&output.stdout).lines() {
+                if let Some(summary) = installed.iter().find(|item| item.name == name) {
+                    return Some(summary.clone());
+                }
+            }
+        }
+    }
+
+    let app_id = desktop.file_stem()?.to_str()?;
+    ctx.flatpak.list_installed().ok()?.into_iter()
+        .find(|item| item.name.eq_ignore_ascii_case(app_id))
+}
 
 fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, handles: UiHandles) {
     // A slow earlier search (e.g. "l" while typing) must not overwrite newer results.

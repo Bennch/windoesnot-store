@@ -7,6 +7,7 @@ use gtk::prelude::*;
 use libadwaita as adw;
 
 use crate::core::models::{ActionKind, AurHelperKind, PackageSource, TransactionAction};
+use crate::core::installation::Installation;
 use crate::ui::AppContext;
 use crate::i18n::{t, tf};
 
@@ -20,6 +21,7 @@ pub struct UpdatesPage {
     apply_selected_button: gtk::Button,
     list: gtk::ListBox,
     status: gtk::Label,
+    spinner: gtk::Spinner,
     error_label: gtk::Label,
     generation: Rc<std::cell::Cell<u64>>,
     search: gtk::SearchEntry,
@@ -56,7 +58,12 @@ impl UpdatesPage {
         let status = gtk::Label::new(Some(t("No update data")));
         status.add_css_class("dim-label");
         status.set_xalign(0.0);
-        root.append(&status);
+        let status_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let spinner = gtk::Spinner::new();
+        spinner.set_visible(false);
+        status_row.append(&spinner);
+        status_row.append(&status);
+        root.append(&status_row);
         let error_label = gtk::Label::new(None);
         error_label.set_wrap(true);
         error_label.set_xalign(0.0);
@@ -111,6 +118,7 @@ impl UpdatesPage {
             apply_selected_button,
             list,
             status,
+            spinner,
             error_label,
             generation: Rc::new(std::cell::Cell::new(0)),
             search,
@@ -139,6 +147,7 @@ impl UpdatesPage {
 
         let list = self.list.clone();
         let status = self.status.clone();
+        let spinner = self.spinner.clone();
         let rows = self.rows.clone();
         let all_updates = self.all_updates.clone();
         let search = self.search.clone();
@@ -146,12 +155,16 @@ impl UpdatesPage {
         let generation = self.generation.clone();
         let error_label = self.error_label.clone();
         self.check_button.connect_clicked(move |_| {
+            spinner.set_visible(true);
+            spinner.start();
+            status.set_text(t("Checking for updates…"));
             let generation = generation.clone();
             generation.set(generation.get() + 1);
             let request = generation.get();
             let error_label = error_label.clone();
             let list = list.clone();
             let status = status.clone();
+            let spinner = spinner.clone();
             let rows = rows.clone();
             let all_updates = all_updates.clone();
             let search = search.clone();
@@ -167,10 +180,12 @@ impl UpdatesPage {
                 let _ = tx.send(items);
             });
 
-            glib::idle_add_local(move || {
+            glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
                 match rx.try_recv() {
                     Ok((items, error)) => {
                         if generation.get() != request { return glib::ControlFlow::Break; }
+                        spinner.stop();
+                        spinner.set_visible(false);
                         error_label.set_visible(error.is_some());
                         error_label.set_text(error.as_deref().unwrap_or(""));
                         *all_updates.borrow_mut() = items;
@@ -185,7 +200,13 @@ impl UpdatesPage {
                         glib::ControlFlow::Break
                     }
                     Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        if generation.get() == request {
+                            spinner.stop();
+                            spinner.set_visible(false);
+                        }
+                        glib::ControlFlow::Break
+                    },
                 }
             });
         });
@@ -221,12 +242,16 @@ impl UpdatesPage {
     }
 
     pub fn refresh(&self, ctx: AppContext, notify: Option<adw::ToastOverlay>) {
+        self.spinner.set_visible(true);
+        self.spinner.start();
+        self.status.set_text(t("Checking for updates…"));
         let generation = self.generation.clone();
         generation.set(generation.get() + 1);
         let request = generation.get();
         let error_label = self.error_label.clone();
         let list = self.list.clone();
         let status = self.status.clone();
+        let spinner = self.spinner.clone();
         let rows = self.rows.clone();
         let all_updates = self.all_updates.clone();
         let search = self.search.clone();
@@ -238,9 +263,11 @@ impl UpdatesPage {
         });
 
         let notify = notify.clone();
-        glib::idle_add_local(move || match rx.try_recv() {
+        glib::timeout_add_local(std::time::Duration::from_millis(40), move || match rx.try_recv() {
             Ok((items, error)) => {
                 if generation.get() != request { return glib::ControlFlow::Break; }
+                spinner.stop();
+                spinner.set_visible(false);
                 error_label.set_visible(error.is_some());
                 error_label.set_text(error.as_deref().unwrap_or(""));
                 *all_updates.borrow_mut() = items;
@@ -264,7 +291,13 @@ impl UpdatesPage {
                 glib::ControlFlow::Break
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                if generation.get() == request {
+                    spinner.stop();
+                    spinner.set_visible(false);
+                }
+                glib::ControlFlow::Break
+            },
         });
     }
 
@@ -286,7 +319,7 @@ impl UpdatesPage {
     }
 }
 
-fn collect_updates(ctx: &AppContext) -> (Vec<(TransactionAction, String)>, Option<String>) {
+pub(crate) fn collect_updates(ctx: &AppContext) -> (Vec<(TransactionAction, String)>, Option<String>) {
     let mut error = None;
     let mut items = Vec::new();
     items.extend(collect_pacman_updates());
@@ -298,6 +331,18 @@ fn collect_updates(ctx: &AppContext) -> (Vec<(TransactionAction, String)>, Optio
     }
     items.extend(collect_flatpak_updates());
     (items, error)
+}
+
+/// Match the actual installed package or Flatpak ID, including alternate
+/// sources for an app shown on a repository detail page.
+pub(crate) fn update_for_installations(
+    updates: &[(TransactionAction, String)],
+    installed: &[Installation],
+) -> Option<(TransactionAction, String)> {
+    updates.iter().find_map(|(action, description)| {
+        installed.iter().any(|item| item.name == action.name && item.source == action.source)
+            .then(|| (action.clone(), description.clone()))
+    })
 }
 
 fn render_updates(
@@ -497,4 +542,24 @@ fn collect_flatpak_updates() -> Vec<(TransactionAction, String)> {
         ));
     }
     items
+}
+
+#[cfg(test)]
+mod detail_tests {
+    use super::*;
+
+    #[test]
+    fn detail_update_matches_installed_name_and_source() {
+        let updates = vec![
+            (TransactionAction { name: "gimp".into(), source: PackageSource::Repo,
+                kind: ActionKind::Install, origin: None }, "gimp 3.0 → 3.1".into()),
+            (TransactionAction { name: "org.gimp.GIMP".into(), source: PackageSource::Flatpak,
+                kind: ActionKind::Upgrade, origin: None }, "org.gimp.GIMP 3.1".into()),
+        ];
+        let installed = [Installation { name: "org.gimp.GIMP".into(),
+            source: PackageSource::Flatpak, version: "3.0".into() }];
+        let (action, _) = update_for_installations(&updates, &installed).unwrap();
+        assert_eq!(action.name, "org.gimp.GIMP");
+        assert_eq!(action.source, PackageSource::Flatpak);
+    }
 }

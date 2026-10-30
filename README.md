@@ -36,6 +36,25 @@ Flathub, and system updates that stay safe for a Hyprland desktop.
 - **WinDoesNot integration:** accent colour and light/dark mode follow the
   desktop settings live; the interface is German or English depending on
   the desktop or system language.
+- **Start menu integration:** `windoesnot-store --open-desktop /path/to/app.desktop`
+  opens the installed app's details page, including when Store is already open.
+  Removal still requires a separate action and review in Store.
+
+### Hyprland update compatibility
+
+The installed `windoesnot-plugins` package declares a dependency on the exact
+Hyprland upstream version and package release it was built against (CPU-level
+rebuild suffixes are allowed). The Store performs full upgrades through pacman,
+so pacman refuses a newer incompatible Hyprland package while that plugin
+package is installed. This is a package dependency gate, not a separate Store
+switch or an automatic compatibility test of every desktop tool.
+
+Before publishing a Hyprland update for WinDoesNot, rebuild and test the
+plugins against the new image's Hyprland headers, port and verify affected
+desktop tools, and publish matching WinDoesNot component packages in the
+signed update repository. Then the full upgrade can proceed together. A user
+who removes the plugin package or bypasses pacman dependencies also removes
+this protection.
 
 ## Build and install
 
@@ -89,6 +108,25 @@ sowie Systemupdates, die für einen Hyprland-Desktop sicher bleiben.
 - **WinDoesNot-Anbindung:** Akzentfarbe sowie Hell/Dunkel folgen live den
   Desktop-Einstellungen; die Oberfläche ist je nach Desktop- oder
   Systemsprache deutsch oder englisch.
+- **Startmenü-Anbindung:** `windoesnot-store --open-desktop /pfad/zur/app.desktop`
+  öffnet die Detailseite einer installierten App, auch bei laufendem Store.
+  Entfernen erfordert weiterhin eine separate Aktion und Prüfung im Store.
+
+### Kompatibilität bei Hyprland-Updates
+
+Das installierte Paket `windoesnot-plugins` verlangt genau die Hyprland-Version
+und Paketrevision, gegen die es gebaut wurde (CPU-spezifische Neubau-Suffixe
+sind erlaubt). Der Store führt vollständige Updates über pacman aus. Solange
+kein passendes neues Plugin-Paket verfügbar ist, lehnt pacman ein inkompatibles
+Hyprland-Update ab. Das ist eine Paketabhängigkeit, kein eigener Store-Schalter
+und keine automatische Prüfung aller Desktop-Werkzeuge.
+
+Vor der Freigabe eines Hyprland-Updates müssen die Plugins mit den Headern der
+neuen Image-Version gebaut und getestet, betroffene Desktop-Werkzeuge angepasst
+und passende WinDoesNot-Komponenten im signierten Update-Repository
+veröffentlicht werden. Erst dann kann das vollständige Update gemeinsam
+erfolgen. Wer das Plugin-Paket entfernt oder Paketabhängigkeiten umgeht,
+entfernt auch diese Sperre.
 
 ### Bauen und installieren
 

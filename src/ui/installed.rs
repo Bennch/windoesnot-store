@@ -4,10 +4,11 @@ use std::sync::mpsc;
 
 use gtk::prelude::*;
 
-use crate::core::models::PackageSummary;
+use crate::core::models::{PackageSource, PackageSummary};
 use crate::ui::details;
+use crate::ui::widgets::app_icon::app_icon;
 use crate::ui::{AppContext, UiHandles};
-use crate::i18n::{t, tf};
+use crate::i18n::t;
 
 #[derive(Clone)]
 pub struct InstalledPage {
@@ -17,6 +18,8 @@ pub struct InstalledPage {
     filter: gtk::DropDown,
     update_all: gtk::Button,
     refresh_button: gtk::Button,
+    loading: gtk::Box,
+    spinner: gtk::Spinner,
     all: Rc<RefCell<Vec<PackageSummary>>>,
     connected: Rc<std::cell::Cell<bool>>,
 }
@@ -58,6 +61,13 @@ impl InstalledPage {
         controls.append(&refresh_button);
         root.append(&controls);
 
+        let loading = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let spinner = gtk::Spinner::new();
+        loading.append(&spinner);
+        loading.append(&gtk::Label::new(Some(t("Loading installed apps…"))));
+        loading.set_visible(false);
+        root.append(&loading);
+
         let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         header_row.add_css_class("table-header");
         header_row.append(&header_label(t("Package"), true, 0));
@@ -85,12 +95,17 @@ impl InstalledPage {
             filter,
             update_all,
             refresh_button,
+            loading,
+            spinner,
             all: Rc::new(RefCell::new(Vec::new())),
             connected: Rc::new(std::cell::Cell::new(false)),
         }
     }
 
     pub fn refresh(&self, ctx: AppContext, handles: UiHandles) {
+        self.loading.set_visible(true);
+        self.spinner.start();
+        self.refresh_button.set_sensitive(false);
         let page = self.clone();
         let all_ref = self.all.clone();
         let (tx, rx) = mpsc::channel();
@@ -108,9 +123,14 @@ impl InstalledPage {
         let update_all = self.update_all.clone();
         let refresh_button = self.refresh_button.clone();
         let connected = self.connected.clone();
-        glib::idle_add_local(move || {
+        let loading = self.loading.clone();
+        let spinner = self.spinner.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
             match rx.try_recv() {
                 Ok(packages) => {
+                    spinner.stop();
+                    loading.set_visible(false);
+                    refresh_button.set_sensitive(true);
                     *all_ref.borrow_mut() = packages.clone();
                     render_list(&list, &packages, &handles, &ctx, 0, "");
                     if !connected.get() {
@@ -166,7 +186,12 @@ impl InstalledPage {
                     glib::ControlFlow::Break
                 }
                 Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    spinner.stop();
+                    loading.set_visible(false);
+                    refresh_button.set_sensitive(true);
+                    glib::ControlFlow::Break
+                },
             }
         });
     }
@@ -182,8 +207,11 @@ fn build_row(pkg: PackageSummary, handles: &UiHandles, ctx: &AppContext) -> gtk:
     content.set_margin_start(8);
     content.set_margin_end(8);
 
-    let name_col = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let name_col = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     name_col.set_hexpand(true);
+    let icon = app_icon(&pkg.name, (pkg.source == PackageSource::Flatpak).then_some(pkg.name.as_str()), 32);
+    icon.set_valign(gtk::Align::Center);
+    name_col.append(&icon);
     let name = gtk::Label::new(Some(&pkg.name));
     name.add_css_class("title-4");
     name.set_xalign(0.0);
