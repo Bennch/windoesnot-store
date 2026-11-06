@@ -40,7 +40,9 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     // Same icon as the tile that opened this page.
     let flathub_id = (summary.source == PackageSource::Flatpak).then_some(summary.name.as_str());
-    let icon = app_icon(&summary.name, flathub_id, 96);
+    // The official Flathub logo replaces this once it is known.
+    let icon = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    icon.append(&app_icon(&summary.name, flathub_id, 96));
     icon.set_valign(gtk::Align::Start);
 
     let text_col = gtk::Box::new(gtk::Orientation::Vertical, 6);
@@ -89,21 +91,26 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
 
     let carousel = ScreenshotCarousel::new();
 
-    let details = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    let version = gtk::Label::new(Some(t("Version: -")));
-    version.set_xalign(0.0);
-    let installed = gtk::Label::new(Some(t("Installed: no")));
-    installed.set_xalign(0.0);
-    let size = gtk::Label::new(Some(t("Size: -")));
-    size.set_xalign(0.0);
-    let homepage = gtk::Label::new(Some(t("Homepage: -")));
-    homepage.set_xalign(0.0);
-    homepage.set_selectable(true);
-    homepage.set_wrap(true);
-    details.append(&version);
-    details.append(&installed);
-    details.append(&size);
-    details.append(&homepage);
+    // Facts as a tidy list instead of loose lines.
+    let details = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    let info_group = adw::PreferencesGroup::new();
+    info_group.set_title(t("Information"));
+    let info_row = |title: &str, hidden: bool| {
+        let row = adw::ActionRow::builder().title(title).subtitle("–").build();
+        row.add_css_class("property");
+        row.set_subtitle_selectable(true);
+        row.set_visible(!hidden);
+        info_group.add(&row);
+        row
+    };
+    let version = info_row(t("Version"), false);
+    let installed = info_row(t("Installed"), false);
+    let size = info_row(t("Size"), false);
+    let homepage = info_row(t("Website"), false);
+    let developer = info_row(t("Developer"), true);
+    let license = info_row(t("License"), true);
+    let categories = info_row(t("Categories"), true);
+    details.append(&info_group);
 
     let update_status = gtk::Label::new(None);
     update_status.set_xalign(0.0);
@@ -124,9 +131,16 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     loading.append(&spinner);
     loading.append(&gtk::Label::new(Some(t("Loading package information…"))));
 
+    let description_heading = gtk::Label::new(Some(t("Description")));
+    description_heading.add_css_class("title-4");
+    description_heading.set_xalign(0.0);
+    description_heading.set_visible(false);
     let description = gtk::Label::new(Some(""));
     description.set_xalign(0.0);
     description.set_wrap(true);
+    description.set_selectable(true);
+    description.set_use_markup(true);
+    description.set_visible(false);
 
     // Every source that offers this app; the install button uses the chosen one.
     let sources_heading = gtk::Label::new(Some(t("Install from")));
@@ -144,12 +158,24 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     root.append(&sources_heading);
     root.append(&sources_list);
     root.append(&button_row);
+    // Shown when this app has an update; says plainly when a system update is needed.
+    let update_banner = adw::Banner::new("");
+    update_banner.set_revealed(false);
+    root.append(&update_banner);
     root.append(&loading);
     root.append(carousel.widget());
-    root.append(&details);
+    root.append(&description_heading);
     root.append(&description);
+    root.append(&details);
 
-    page.set_child(Some(&root));
+    // Scrollable and capped in width so long texts stay readable.
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(960);
+    clamp.set_child(Some(&root));
+    let scroller = gtk::ScrolledWindow::new();
+    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scroller.set_child(Some(&clamp));
+    page.set_child(Some(&scroller));
     handles.nav_view.push(&page);
 
     let nav = handles.nav_view.clone();
@@ -164,11 +190,13 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let installed_clone = installed.clone();
     let size_clone = size.clone();
     let description_clone = description.clone();
+    let description_heading_clone = description_heading.clone();
     let carousel_clone = carousel.clone();
     let action_btn_clone = action_btn.clone();
     let update_loading_for_details = update_loading.clone();
     let update_spinner_for_details = update_spinner.clone();
     let update_btn_for_status = update_btn.clone();
+    let update_banner_for_status = update_banner.clone();
     let pending_update_for_status = pending_update.clone();
     let loading_clone = loading.clone();
     let spinner_clone = spinner.clone();
@@ -179,6 +207,8 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let home_url = Rc::new(RefCell::new(None::<String>));
     let home_url_clone = home_url.clone();
     let appstream = ctx.appstream.clone();
+    let (name_clone, developer_clone, license_clone, categories_clone) = (name.clone(), developer.clone(), license.clone(), categories.clone());
+    let icon_slot = icon.clone();
 
     let summary_source = summary.source;
     let sources_heading_clone = sources_heading.clone();
@@ -189,8 +219,8 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     std::thread::spawn(move || {
         let found = ctx_clone.installed_apps().find(&summary_clone.name, flatpak_id.as_deref());
         let options = source_options(&ctx_clone, &summary_clone, flatpak_id.as_deref());
-        let details = load_details(ctx_clone.clone(), summary_clone, appstream);
-        let _ = tx.send((details, found.clone(), options));
+        let (details, info) = load_details(ctx_clone.clone(), summary_clone, appstream, flatpak_id.as_deref());
+        let _ = tx.send((details, found.clone(), options, info));
         let update = if found.is_empty() {
             None
         } else {
@@ -202,15 +232,18 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
 
     glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
         match rx.try_recv() {
-            Ok((details, found, options)) => {
+            Ok((details, found, options, info)) => {
+                let info = info.unwrap_or_default();
                 spinner_clone.stop();
                 loading_clone.set_visible(false);
                 fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone);
-                sources_heading_clone.set_visible(!options.is_empty());
-                sources_list_clone.set_visible(!options.is_empty());
+                // Installed: the button removes, so choosing a source is moot.
+                let pick_source = found.is_empty() && !options.is_empty();
+                sources_heading_clone.set_visible(pick_source);
+                sources_list_clone.set_visible(pick_source);
                 summary_label_clone.set_text(&details.summary);
-                version_clone.set_text(&tf("Version: {}", &[&details.version]));
-                installed_clone.set_text(&installed_text(&found));
+                version_clone.set_subtitle(&markup_escape(if details.version.is_empty() { "–" } else { &details.version }));
+                installed_clone.set_subtitle(&markup_escape(&installed_value(&found)));
                 action_btn_clone.set_label(&match preferred(&found, summary_source) {
                     Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                     None => t("Install").to_string(),
@@ -222,18 +255,51 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 }
                 *installations_clone.borrow_mut() = found;
                 if let Some(size) = &details.size {
-                    size_clone.set_text(&tf("Size: {}", &[size]));
+                    size_clone.set_subtitle(&markup_escape(size));
                 }
-                if let Some(home) = details.home.clone() {
-                    homepage_clone.set_text(&tf("Homepage: {}", &[&home]));
+                if let Some(home) = details.home.clone().or_else(|| info.homepage.clone()) {
+                    let shown = markup_escape(&home);
+                    homepage_clone.set_subtitle(&format!("<a href=\"{shown}\">{shown}</a>"));
                     *home_url_clone.borrow_mut() = Some(home);
                     open_home_btn_clone.set_visible(true);
                 } else {
-                    homepage_clone.set_text(t("Homepage: -"));
+                    homepage_clone.set_subtitle("–");
                     *home_url_clone.borrow_mut() = None;
                     open_home_btn_clone.set_visible(false);
                 }
-                description_clone.set_text(&details.description);
+                if let Some(path) = &info.icon_path {
+                    if let Ok(texture) = gtk::gdk::Texture::from_filename(path) {
+                        let image = gtk::Image::from_paintable(Some(&texture));
+                        image.set_pixel_size(96);
+                        while let Some(child) = icon_slot.first_child() {
+                            icon_slot.remove(&child);
+                        }
+                        icon_slot.append(&image);
+                    }
+                }
+                if let Some(title) = &info.title {
+                    name_clone.set_text(title);
+                }
+                if let Some(summary) = &info.summary {
+                    summary_label_clone.set_text(summary);
+                }
+                match &info.description {
+                    Some(markup) => description_clone.set_markup(markup),
+                    None => description_clone.set_markup(&markup_escape(&details.description)),
+                }
+                let has_description = !description_clone.text().trim().is_empty();
+                description_clone.set_visible(has_description);
+                description_heading_clone.set_visible(has_description);
+                for (row, value) in [
+                    (&developer_clone, info.developer.clone()),
+                    (&license_clone, info.license.clone()),
+                    (&categories_clone, (!info.categories.is_empty()).then(|| info.categories.join(", "))),
+                ] {
+                    row.set_visible(value.is_some());
+                    if let Some(value) = value {
+                        row.set_subtitle(&markup_escape(&value));
+                    }
+                }
                 carousel_clone.set_screenshots(details.screenshots.clone());
                 glib::ControlFlow::Break
             }
@@ -253,15 +319,27 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 update_loading.set_visible(false);
                 if let Some((action, description)) = update {
                     let message = tf("Update available: {}", &[&description]);
-                    update_status.set_visible(true);
                     if action.source == PackageSource::Flatpak {
-                        update_status.set_text(&message);
+                        update_banner_for_status.set_title(&message);
                         *pending_update_for_status.borrow_mut() = Some(action);
-                        update_btn_for_status.set_visible(true);
                     } else {
-                        update_status.set_text(&format!("{}\n{}", message,
-                            t("This system package can only be updated as part of a full system upgrade.")));
+                        // Pacman and AUR packages only update with the whole system.
+                        update_banner_for_status.set_title(&format!(
+                            "{}\n{}",
+                            message,
+                            t("A system update is required: this package can only be updated together with the whole system.")
+                        ));
+                        update_btn_for_status.set_label(t("Start system update"));
+                        let (name, source) = if action.source == PackageSource::Aur { ("aur", PackageSource::Aur) } else { ("system", PackageSource::Repo) };
+                        *pending_update_for_status.borrow_mut() = Some(TransactionAction {
+                            name: name.into(),
+                            source,
+                            kind: crate::core::models::ActionKind::Upgrade,
+                            origin: None,
+                        });
                     }
+                    update_banner_for_status.set_revealed(true);
+                    update_btn_for_status.set_visible(true);
                 } else if !installations_clone_for_status.borrow().is_empty() {
                     update_status.set_text(t("No update found in current package data"));
                     update_status.set_visible(true);
@@ -403,7 +481,7 @@ fn fill_sources(
     }
 }
 
-fn load_details(ctx: AppContext, summary: PackageSummary, appstream: Arc<AppStreamClient>) -> PackageDetails {
+fn load_details(ctx: AppContext, summary: PackageSummary, appstream: Arc<AppStreamClient>, flatpak_id: Option<&str>) -> (PackageDetails, Option<crate::core::appstream::FlathubInfo>) {
     // Ask the local database instead of trusting the caller: home tiles open
     // this page without knowing whether the package is installed.
     let mut details = match summary.source {
@@ -427,7 +505,9 @@ fn load_details(ctx: AppContext, summary: PackageSummary, appstream: Arc<AppStre
             .unwrap_or_else(|_| fallback_details(&summary)),
     };
 
+    let mut component_id = None;
     if let Some(component) = appstream.search_component(&summary.name) {
+        component_id = Some(component.id.clone());
         let comp = appstream
             .get_component(&component.id)
             .unwrap_or(component);
@@ -442,7 +522,22 @@ fn load_details(ctx: AppContext, summary: PackageSummary, appstream: Arc<AppStre
         }
     }
 
-    details
+    // Flathub's own data: nicer name, formatted description, screenshots.
+    let own_id = (summary.source == PackageSource::Flatpak).then(|| summary.name.clone());
+    let mut info = [flatpak_id.map(str::to_owned), own_id, component_id]
+        .into_iter()
+        .flatten()
+        .find_map(|id| AppStreamClient::flathub_info(&id));
+    if info.is_none() && summary.source != PackageSource::Flatpak {
+        info = sources::flathub_id_for(&summary.name).and_then(|id| AppStreamClient::flathub_info(&id));
+    }
+    if let Some(info) = &info {
+        if details.screenshots.is_empty() {
+            details.screenshots = info.screenshots.clone();
+        }
+    }
+
+    (details, info)
 }
 
 fn fallback_details(summary: &PackageSummary) -> PackageDetails {
@@ -466,14 +561,18 @@ fn preferred(found: &[Installation], source: PackageSource) -> Option<&Installat
     found.iter().find(|installation| installation.source == source).or_else(|| found.first())
 }
 
-/// "Installed: no" or "Installed: yes – Flatpak org.gimp.GIMP 3.0.4; …".
-fn installed_text(found: &[Installation]) -> String {
+fn markup_escape(text: &str) -> String {
+    glib::markup_escape_text(text).to_string()
+}
+
+/// "Not installed" or "Flatpak org.gimp.GIMP 3.0.4; Pacman gimp 3.0.2".
+fn installed_value(found: &[Installation]) -> String {
     if found.is_empty() {
-        return tf("Installed: {}", &[&t("no")]);
+        return t("Not installed").to_string();
     }
-    let places: Vec<String> = found
+    found
         .iter()
         .map(|installation| format!("{} {} {}", installation.source.label(), installation.name, installation.version).trim_end().to_string())
-        .collect();
-    tf("Installed: yes – {}", &[&places.join("; ")])
+        .collect::<Vec<_>>()
+        .join("; ")
 }

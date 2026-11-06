@@ -81,6 +81,13 @@ fn matching_flatpak(hits: &[(String, String)], ids: &[String], packages: &[Strin
         .cloned()
 }
 
+/// The Flathub application id for a package whose name ends the id
+/// (audacity -> org.audacityteam.Audacity); None when there is no clear match.
+pub fn flathub_id_for(package: &str) -> Option<String> {
+    let names: Vec<String> = crate::core::icons::base_names(package);
+    matching_flatpak(&flathub_search(package), &[], &names).map(|(id, _)| id)
+}
+
 /// Flathub search results as (application id, version), from the local
 /// appstream cache; no network access of its own.
 pub fn flathub_search(query: &str) -> Vec<(String, String)> {

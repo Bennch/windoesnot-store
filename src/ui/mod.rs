@@ -184,11 +184,18 @@ impl QueueController {
     }
 
     pub fn add_upgrade_all(&self) {
+        self.add_upgrade_source(None);
+    }
+
+    /// Queue the full upgrade of one source, or of all when `only` is None.
+    pub fn add_upgrade_source(&self, only: Option<PackageSource>) {
         let aur_available = self.ctx.settings.lock().unwrap().aur_available();
         let flatpak_available = crate::core::cache::command_exists("flatpak");
         let mut queue = self.ctx.queue.lock().unwrap();
         for action in all_upgrade_actions(aur_available, flatpak_available) {
-            queue.push(action);
+            if only.map_or(true, |source| action.source == source) {
+                queue.push(action);
+            }
         }
         drop(queue);
         self.update_label();
@@ -670,8 +677,16 @@ pub fn build_ui(app: &adw::Application) {
         sidebar.select_row(sidebar.row_at_index(3).as_ref());
     }
 
-    updates_page.connect_apply_all(clone!(@strong queue_controller => move || {
-        queue_controller.add_upgrade_all();
+    updates_page.connect_apply_all(clone!(@strong queue_controller => move |only| {
+        queue_controller.add_upgrade_source(only);
+    }));
+
+    updates_page.connect_group_update(clone!(@strong queue_controller => move |actions| {
+        let whole_system = actions.iter().any(|a| a.source != PackageSource::Flatpak);
+        queue_controller.add_upgrade_packages(actions);
+        if whole_system {
+            queue_controller.toast(t("System packages are updated together: the whole system update is queued."));
+        }
     }));
 
     updates_page.connect_apply_selected(clone!(@strong queue_controller => move |actions| {
@@ -688,6 +703,33 @@ pub fn build_ui(app: &adw::Application) {
         aur_updates.refresh(aur_context.clone(), None);
     });
     search_page.bind_search(ctx.clone(), handles.clone(), stack.clone());
+    // Opening Search, from the sidebar or the home page, lands in the search field.
+    let entry_for_focus = search_page.entry.clone();
+    let home_entry_for_focus = home_page.search.clone();
+    stack.connect_visible_child_name_notify(move |stack| {
+        let entry = match stack.visible_child_name().as_deref() {
+            Some("search") => entry_for_focus.clone(),
+            Some("home") => home_entry_for_focus.clone(),
+            _ => return,
+        };
+        glib::idle_add_local_once(move || {
+            entry.grab_focus();
+            entry.set_position(-1);
+        });
+    });
+
+    // Enter in the home search field continues on the Search page.
+    let (sidebar_for_home_enter, search_entry_for_home) = (sidebar.clone(), search_page.entry.clone());
+    home_page.search.connect_activate(move |home_entry| {
+        let text = home_entry.text();
+        if text.trim().is_empty() {
+            return;
+        }
+        search_entry_for_home.set_text(&text);
+        home_entry.set_text("");
+        // Through the sidebar so its highlight follows.
+        sidebar_for_home_enter.select_row(sidebar_for_home_enter.row_at_index(1).as_ref());
+    });
     home_page.bind(ctx.clone(), handles.clone());
 
     let updates_page_refresh = updates_page.clone();
@@ -769,12 +811,9 @@ fn installed_for_desktop(ctx: &AppContext, path: &str) -> Option<PackageSummary>
         .find(|item| item.name.eq_ignore_ascii_case(app_id))
 }
 
-fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, handles: UiHandles) {
-    // A slow earlier search (e.g. "l" while typing) must not overwrite newer results.
-    let generation = SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    let (done_tx, done_rx) = std::sync::mpsc::channel::<Vec<PackageSummary>>();
-    let ctx_thread = ctx.clone();
-    std::thread::spawn(move || {
+/// All sources at once, installed-marked and sorted by relevance; blocking.
+pub(crate) fn search_all(ctx_thread: &AppContext, query: &str) -> Vec<PackageSummary> {
+    let query = query.to_string();
         // Snap whether flatpak is installed once per call so providers
         // and the installed-set lookup agree.
         let flatpak_enabled = *ctx_thread
@@ -873,7 +912,16 @@ fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, h
 
         let mut results: Vec<_> = dedup.into_values().collect();
         sort_by_relevance(&mut results, &query);
-        let _ = done_tx.send(results);
+        results
+}
+
+fn run_search(query: String, ctx: AppContext, search_page: search::SearchPage, handles: UiHandles) {
+    // A slow earlier search (e.g. "l" while typing) must not overwrite newer results.
+    let generation = SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<Vec<PackageSummary>>();
+    let ctx_thread = ctx.clone();
+    std::thread::spawn(move || {
+        let _ = done_tx.send(search_all(&ctx_thread, &query));
     });
 
     glib::timeout_add_local(std::time::Duration::from_millis(40), move || match done_rx.try_recv() {

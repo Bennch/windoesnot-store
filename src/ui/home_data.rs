@@ -82,12 +82,6 @@ pub const BANNERS: &[(&str, &str)] = &[
     ("localsend", "banner-localsend"),
 ];
 
-/// Shown under "Our picks", in this order.
-pub const PICKS: &[&str] = &[
-    "localsend", "gimp", "obs-studio", "keepassxc", "kdenlive", "thunderbird",
-    "inkscape", "vlc", "signal-desktop", "prismlauncher", "handbrake", "xournalpp",
-];
-
 pub const APPS: &[HomeApp] = &[
     HomeApp { package: "gimp", flathub: "org.gimp.GIMP", name: "GIMP", category: Category::Create, summary_de: "Fotos bearbeiten und Grafiken gestalten", summary_en: "Edit photos and create graphics" },
     HomeApp { package: "inkscape", flathub: "org.inkscape.Inkscape", name: "Inkscape", category: Category::Create, summary_de: "Vektorgrafiken, Logos und Illustrationen", summary_en: "Vector graphics, logos and illustrations" },
@@ -123,6 +117,32 @@ pub const APPS: &[HomeApp] = &[
     HomeApp { package: "kate", flathub: "org.kde.kate", name: "Kate", category: Category::Develop, summary_de: "Vielseitiger Texteditor", summary_en: "Versatile text editor" },
     HomeApp { package: "meld", flathub: "org.gnome.meld", name: "Meld", category: Category::Develop, summary_de: "Dateien und Ordner vergleichen", summary_en: "Compare files and folders" },
     HomeApp { package: "qbittorrent", flathub: "org.qbittorrent.qBittorrent", name: "qBittorrent", category: Category::Media, summary_de: "Torrents herunterladen", summary_en: "Download torrents" },
+    HomeApp { package: "scribus", flathub: "net.scribus.Scribus", name: "Scribus", category: Category::Create, summary_de: "Flyer, Magazine und PDFs setzen", summary_en: "Layout flyers, magazines and PDFs" },
+    HomeApp { package: "shotcut", flathub: "org.shotcut.Shotcut", name: "Shotcut", category: Category::Create, summary_de: "Einfacher Videoeditor für alle Formate", summary_en: "Simple video editor for any format" },
+    HomeApp { package: "rawtherapee", flathub: "com.rawtherapee.RawTherapee", name: "RawTherapee", category: Category::Create, summary_de: "RAW-Fotos entwickeln", summary_en: "Develop RAW photos" },
+    HomeApp { package: "pinta", flathub: "com.github.PintaProject.Pinta", name: "Pinta", category: Category::Create, summary_de: "Schnell Bilder zeichnen und bearbeiten", summary_en: "Quickly draw and edit images" },
+    HomeApp { package: "ardour", flathub: "org.ardour.Ardour", name: "Ardour", category: Category::Create, summary_de: "Musik aufnehmen und produzieren", summary_en: "Record and produce music" },
+    HomeApp { package: "freecad", flathub: "org.freecad.FreeCAD", name: "FreeCAD", category: Category::Create, summary_de: "3D-Konstruktion und CAD", summary_en: "3D design and CAD" },
+    HomeApp { package: "kicad", flathub: "org.kicad.kicad", name: "KiCad", category: Category::Create, summary_de: "Schaltpläne und Platinen entwerfen", summary_en: "Design schematics and circuit boards" },
+    HomeApp { package: "calibre", flathub: "com.calibre_ecosystem.calibre", name: "Calibre", category: Category::Work, summary_de: "E-Books verwalten und umwandeln", summary_en: "Manage and convert e-books" },
+    HomeApp { package: "obsidian", flathub: "md.obsidian.Obsidian", name: "Obsidian", category: Category::Work, summary_de: "Notizen verknüpfen und sammeln", summary_en: "Link and collect notes" },
+    HomeApp { package: "bitwarden", flathub: "com.bitwarden.desktop", name: "Bitwarden", category: Category::Work, summary_de: "Passwörter in der Cloud verwalten", summary_en: "Manage passwords in the cloud" },
+    HomeApp { package: "foliate", flathub: "com.github.johnfactotum.Foliate", name: "Foliate", category: Category::Work, summary_de: "E-Books bequem lesen", summary_en: "Read e-books comfortably" },
+    HomeApp { package: "kdeconnect", flathub: "org.kde.kdeconnect.app", name: "KDE Connect", category: Category::Work, summary_de: "Handy und PC verbinden", summary_en: "Connect your phone and PC" },
+    HomeApp { package: "flameshot", flathub: "org.flameshot.Flameshot", name: "Flameshot", category: Category::Work, summary_de: "Screenshots aufnehmen und markieren", summary_en: "Take and annotate screenshots" },
+    HomeApp { package: "protonup-qt", flathub: "net.davidotek.pupgui2", name: "ProtonUp-Qt", category: Category::Games, summary_de: "Proton-Versionen für Steam verwalten", summary_en: "Manage Proton versions for Steam" },
+    HomeApp { package: "goverlay", flathub: "io.github.benjamimgois.goverlay", name: "GOverlay", category: Category::Games, summary_de: "FPS und Leistung im Spiel anzeigen", summary_en: "Show FPS and performance in games" },
+    HomeApp { package: "chromium", flathub: "org.chromium.Chromium", name: "Chromium", category: Category::Social, summary_de: "Schneller Webbrowser", summary_en: "Fast web browser" },
+    HomeApp { package: "librewolf", flathub: "io.gitlab.librewolf-community", name: "LibreWolf", category: Category::Social, summary_de: "Privater Browser auf Firefox-Basis", summary_en: "Privacy-focused Firefox-based browser" },
+    HomeApp { package: "remmina", flathub: "org.remmina.Remmina", name: "Remmina", category: Category::Social, summary_de: "Fremde Rechner fernsteuern", summary_en: "Control remote computers" },
+    HomeApp { package: "transmission-gtk", flathub: "com.transmissionbt.Transmission", name: "Transmission", category: Category::Media, summary_de: "Schlanker Torrent-Client", summary_en: "Lightweight torrent client" },
+    HomeApp { package: "mkvtoolnix-gui", flathub: "org.bunkus.mkvtoolnix-gui", name: "MKVToolNix", category: Category::Media, summary_de: "MKV-Videos zusammenstellen und bearbeiten", summary_en: "Merge and edit MKV videos" },
+    HomeApp { package: "vscodium", flathub: "com.vscodium.codium", name: "VSCodium", category: Category::Develop, summary_de: "Code-Editor ohne Microsoft-Tracking", summary_en: "Code editor without Microsoft telemetry" },
+    HomeApp { package: "dbeaver", flathub: "io.dbeaver.DBeaverCommunity", name: "DBeaver", category: Category::Develop, summary_de: "Datenbanken ansehen und abfragen", summary_en: "Browse and query databases" },
+    HomeApp { package: "filezilla", flathub: "org.filezillaproject.Filezilla", name: "FileZilla", category: Category::Develop, summary_de: "Dateien per FTP und SFTP übertragen", summary_en: "Transfer files via FTP and SFTP" },
+    HomeApp { package: "wireshark-qt", flathub: "org.wireshark.Wireshark", name: "Wireshark", category: Category::Develop, summary_de: "Netzwerkverkehr analysieren", summary_en: "Analyse network traffic" },
+    HomeApp { package: "gitg", flathub: "org.gnome.gitg", name: "gitg", category: Category::Develop, summary_de: "Git-Verlauf grafisch ansehen", summary_en: "Browse Git history graphically" },
+    HomeApp { package: "virt-manager", flathub: "org.virt_manager.virt-manager", name: "Virt-Manager", category: Category::Develop, summary_de: "Virtuelle Maschinen verwalten", summary_en: "Manage virtual machines" },
 ];
 
 pub fn app(package: &str) -> Option<&'static HomeApp> {
@@ -136,9 +156,6 @@ mod tests {
     #[test]
     fn curated_references_exist() {
         for (package, _) in BANNERS {
-            assert!(app(package).is_some(), "{package}");
-        }
-        for package in PICKS {
             assert!(app(package).is_some(), "{package}");
         }
         for category in Category::ALL {

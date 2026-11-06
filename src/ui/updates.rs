@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -10,6 +11,9 @@ use crate::core::models::{ActionKind, AurHelperKind, PackageSource, TransactionA
 use crate::core::installation::Installation;
 use crate::ui::AppContext;
 use crate::i18n::{t, tf};
+
+/// Queues the actions behind a group header's button.
+type GroupCallback = Rc<RefCell<Option<Rc<dyn Fn(Vec<TransactionAction>)>>>>;
 
 #[derive(Clone)]
 pub struct UpdatesPage {
@@ -25,6 +29,9 @@ pub struct UpdatesPage {
     generation: Rc<std::cell::Cell<u64>>,
     search: gtk::SearchEntry,
     source_filter: gtk::DropDown,
+    topic_filter: gtk::DropDown,
+    topics: Rc<RefCell<HashMap<(PackageSource, String), Info>>>,
+    group_callback: GroupCallback,
     rows: Rc<RefCell<Vec<(gtk::CheckButton, TransactionAction, String)>>>,
     all_updates: Rc<RefCell<Vec<(TransactionAction, String)>>>,
 }
@@ -74,9 +81,14 @@ impl UpdatesPage {
         search.set_placeholder_text(Some(t("Filter updates")));
         root.append(&search);
         let source_filter =
-            gtk::DropDown::from_strings(&[t("All Sources"), t("Pacman"), t("AUR"), t("Flatpak")]);
+            gtk::DropDown::from_strings(&[t("Everything"), t("System (Pacman)"), t("AUR"), t("Programs (Flatpak)")]);
         source_filter.set_selected(0);
         root.append(&source_filter);
+        let topic_filter = gtk::DropDown::from_strings(&[
+            t("All topics"), t("Programs"), t("System & drivers"), t("Tools"), t("Libraries"),
+        ]);
+        topic_filter.set_selected(0);
+        root.append(&topic_filter);
 
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         buttons.add_css_class("page-controls");
@@ -119,6 +131,9 @@ impl UpdatesPage {
             generation: Rc::new(std::cell::Cell::new(0)),
             search,
             source_filter,
+            topic_filter,
+            topics: Rc::new(RefCell::new(HashMap::new())),
+            group_callback: Rc::new(RefCell::new(None)),
             rows: Rc::new(RefCell::new(Vec::new())),
             all_updates: Rc::new(RefCell::new(Vec::new())),
         }
@@ -146,6 +161,9 @@ impl UpdatesPage {
         let status = self.status.clone();
         let all_updates = self.all_updates.clone();
         let source_filter = self.source_filter.clone();
+        let topic_filter = self.topic_filter.clone();
+        let topics = self.topics.clone();
+        let group_callback = self.group_callback.clone();
         self.search.connect_search_changed(move |entry| {
             let query = entry.text().to_string();
             let items = all_updates.borrow();
@@ -155,6 +173,9 @@ impl UpdatesPage {
                 &items,
                 &query,
                 source_filter.selected(),
+                topic_filter.selected(),
+                &topics.borrow(),
+                &group_callback,
                 &status,
             );
         });
@@ -164,10 +185,29 @@ impl UpdatesPage {
         let status = self.status.clone();
         let all_updates = self.all_updates.clone();
         let search = self.search.clone();
+        let apply_button = self.apply_button.clone();
+        let topic_filter = self.topic_filter.clone();
+        let topics = self.topics.clone();
+        let group_callback = self.group_callback.clone();
         self.source_filter.connect_selected_notify(move |f| {
+            apply_button.set_label(update_button_label(f.selected()));
             let query = search.text().to_string();
             let items = all_updates.borrow();
-            render_updates(&list, &rows, &items, &query, f.selected(), &status);
+            render_updates(&list, &rows, &items, &query, f.selected(), topic_filter.selected(), &topics.borrow(), &group_callback, &status);
+        });
+
+        let list = self.list.clone();
+        let rows = self.rows.clone();
+        let status = self.status.clone();
+        let all_updates = self.all_updates.clone();
+        let search = self.search.clone();
+        let source_filter = self.source_filter.clone();
+        let topics = self.topics.clone();
+        let group_callback = self.group_callback.clone();
+        self.topic_filter.connect_selected_notify(move |f| {
+            let query = search.text().to_string();
+            let items = all_updates.borrow();
+            render_updates(&list, &rows, &items, &query, source_filter.selected(), f.selected(), &topics.borrow(), &group_callback, &status);
         });
     }
 
@@ -186,6 +226,9 @@ impl UpdatesPage {
         let all_updates = self.all_updates.clone();
         let search = self.search.clone();
         let source_filter = self.source_filter.clone();
+        let topic_filter = self.topic_filter.clone();
+        let topics = self.topics.clone();
+        let group_callback = self.group_callback.clone();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             // Refresh the search copy regardless of its age: this runs every
@@ -194,25 +237,30 @@ impl UpdatesPage {
             if let Err(err) = crate::core::syncdb::refresh_now() {
                 eprintln!("windoesnot-store: update check without fresh database: {err}");
             }
-            let items = collect_updates(&ctx);
-            let _ = tx.send(items);
+            let (items, error) = collect_updates(&ctx);
+            let sorted = classify(&items);
+            let _ = tx.send((items, error, sorted));
         });
 
         let notify = notify.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(40), move || match rx.try_recv() {
-            Ok((items, error)) => {
+            Ok((items, error, sorted)) => {
                 if generation.get() != request { return glib::ControlFlow::Break; }
                 spinner.stop();
                 spinner.set_visible(false);
                 error_label.set_visible(error.is_some());
                 error_label.set_text(error.as_deref().unwrap_or(""));
                 *all_updates.borrow_mut() = items;
+                *topics.borrow_mut() = sorted;
                 render_updates(
                     &list,
                     &rows,
                     &all_updates.borrow(),
                     &search.text(),
                     source_filter.selected(),
+                    topic_filter.selected(),
+                    &topics.borrow(),
+                    &group_callback,
                     &status,
                 );
                 if let Some(toasts) = notify.as_ref() {
@@ -237,8 +285,23 @@ impl UpdatesPage {
         });
     }
 
-    pub fn connect_apply_all<F: Fn() + 'static>(&self, f: F) {
-        self.apply_button.connect_clicked(move |_| f());
+    /// The button updates what the source filter shows: everything, or one source.
+    /// Pacman packages are never split further; they only work as a set.
+    pub fn connect_apply_all<F: Fn(Option<PackageSource>) + 'static>(&self, f: F) {
+        let filter = self.source_filter.clone();
+        self.apply_button.connect_clicked(move |_| {
+            f(match filter.selected() {
+                1 => Some(PackageSource::Repo),
+                2 => Some(PackageSource::Aur),
+                3 => Some(PackageSource::Flatpak),
+                _ => None,
+            })
+        });
+    }
+
+    /// Called with the actions behind a group header's update button.
+    pub fn connect_group_update<F: Fn(Vec<TransactionAction>) + 'static>(&self, f: F) {
+        *self.group_callback.borrow_mut() = Some(Rc::new(f));
     }
 
     pub fn connect_apply_selected<F: Fn(Vec<TransactionAction>) + 'static>(&self, f: F) {
@@ -287,6 +350,9 @@ fn render_updates(
     items: &[(TransactionAction, String)],
     query: &str,
     source_filter_idx: u32,
+    topic_idx: u32,
+    topics: &HashMap<(PackageSource, String), Info>,
+    group_callback: &GroupCallback,
     status: &gtk::Label,
 ) {
     while let Some(child) = list.first_child() {
@@ -302,6 +368,10 @@ fn render_updates(
             2 => action.source == PackageSource::Aur,
             3 => action.source == PackageSource::Flatpak,
             _ => true,
+        })
+        .filter(|(action, _)| {
+            topic_idx == 0
+                || topics.get(&(action.source, action.name.clone())).map_or(false, |info| info.topic as u32 + 1 == topic_idx)
         })
         .filter(|(_, display)| q.is_empty() || display.to_lowercase().contains(&q))
         .cloned()
@@ -320,11 +390,69 @@ fn render_updates(
         "{} updates shown ({} total)",
         &[&filtered.len(), &items.len()],
     ));
+    // Group under topic headers, alphabetical within a group.
+    let topic_of = |action: &TransactionAction| topics.get(&(action.source, action.name.clone())).map_or(Topic::Tools, |info| info.topic);
+    let mut filtered = filtered;
+    filtered.sort_by_key(|(action, _)| (topic_of(action) as u32, action.name.to_lowercase()));
+    let mut counts = [0usize; 4];
+    let mut members: [Vec<TransactionAction>; 4] = Default::default();
+    for (action, _) in &filtered {
+        counts[topic_of(action) as usize] += 1;
+        members[topic_of(action) as usize].push(action.clone());
+    }
+    let mut current: Option<Topic> = None;
     for (action, display) in filtered {
+        let topic = topic_of(&action);
+        if current != Some(topic) {
+            current = Some(topic);
+            let title = topic.title();
+            let label = gtk::Label::new(Some(&format!("{title} ({})", counts[topic as usize])));
+            label.add_css_class("title-4");
+            label.set_xalign(0.0);
+            label.set_hexpand(true);
+            let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            header.set_margin_top(14);
+            header.set_margin_bottom(4);
+            header.set_margin_start(6);
+            header.set_margin_end(6);
+            header.append(&label);
+
+            // Flatpaks update one by one. Pacman and AUR packages only work as a set,
+            // so a group containing them queues the whole pacman/AUR update.
+            let group = &members[topic as usize];
+            let mut queue_actions: Vec<TransactionAction> = group
+                .iter()
+                .filter(|a| a.source == PackageSource::Flatpak)
+                .map(|a| TransactionAction { kind: ActionKind::Upgrade, ..a.clone() })
+                .collect();
+            for (source, name) in [(PackageSource::Repo, "system"), (PackageSource::Aur, "aur")] {
+                if group.iter().any(|a| a.source == source) {
+                    queue_actions.push(TransactionAction { name: name.into(), source, kind: ActionKind::Upgrade, origin: None });
+                }
+            }
+            let button = gtk::Button::with_label(&tf("Update {}", &[&title]));
+            if group.iter().any(|a| a.source != PackageSource::Flatpak) {
+                button.set_tooltip_text(Some(t("System packages can only be updated together, so this updates the whole system.")));
+            }
+            let callback = group_callback.clone();
+            button.connect_clicked(move |_| {
+                if let Some(f) = callback.borrow().as_ref() {
+                    f(queue_actions.clone());
+                }
+            });
+            header.append(&button);
+            let header_row = gtk::ListBoxRow::new();
+            header_row.set_selectable(false);
+            header_row.set_activatable(false);
+            header_row.set_child(Some(&header));
+            list.append(&header_row);
+        }
         let check = gtk::CheckButton::new();
         check.set_active(true);
         check.set_visible(false);
         check.set_margin_end(2);
+
+        let icon = package_icon(topics.get(&(action.source, action.name.clone())).and_then(|i| i.icon.as_deref()), &action.name);
 
         let name_col = gtk::Box::new(gtk::Orientation::Vertical, 2);
         name_col.set_hexpand(true);
@@ -365,6 +493,7 @@ fn render_updates(
         row_box.set_margin_start(6);
         row_box.set_margin_end(6);
         row_box.append(&check);
+        row_box.append(&icon);
         row_box.append(&name_col);
         row_box.append(&source_badge);
         row_box.append(&mode_badge);
@@ -375,6 +504,121 @@ fn render_updates(
         list.append(&row);
 
         rows.borrow_mut().push((check, action, display));
+    }
+}
+
+/// Topic and launcher icon (theme name or absolute file) of one pending update.
+#[derive(Clone, Debug)]
+pub struct Info {
+    pub topic: Topic,
+    pub icon: Option<String>,
+}
+
+/// What an update is for. Display-only: pacman updates still go in as one set.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Topic {
+    Programs = 0,
+    System = 1,
+    Tools = 2,
+    Libraries = 3,
+}
+
+fn is_system_name(name: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "linux", "nvidia", "mesa", "lib32-mesa", "vulkan", "lib32-vulkan", "systemd", "mkinitcpio",
+        "grub", "networkmanager", "pipewire", "wireplumber", "xdg-desktop-portal", "cachyos",
+        "chwd", "glibc", "btrfs", "xfsprogs", "lvm2", "device-mapper", "udev", "intel-", "amd-",
+    ];
+    name.contains("firmware") || PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+}
+
+/// Sort pending updates by topic from local data: launcher files, install reason, names.
+fn classify(items: &[(TransactionAction, String)]) -> HashMap<(PackageSource, String), Info> {
+    classify_packages(items.iter().map(|(action, _)| (action.source, action.name.as_str())))
+}
+
+impl Topic {
+    pub fn title(self) -> &'static str {
+        match self {
+            Topic::Programs => t("Programs"),
+            Topic::System => t("System & drivers"),
+            Topic::Tools => t("Tools"),
+            Topic::Libraries => t("Libraries"),
+        }
+    }
+}
+
+/// Same sorting for any list of packages (updates, installed).
+pub(crate) fn classify_packages<'a>(
+    items: impl Iterator<Item = (PackageSource, &'a str)>,
+) -> HashMap<(PackageSource, String), Info> {
+    let run = |args: &[&str]| {
+        Command::new("pacman").args(args).env("LC_ALL", "C").output().ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok()).unwrap_or_default()
+    };
+    // One call for all packages: "pkg /usr/share/applications/x.desktop".
+    let mut launcher: HashMap<String, String> = HashMap::new();
+    for line in run(&["-Ql"]).lines() {
+        if line.contains(" /usr/share/applications/") && line.ends_with(".desktop") {
+            if let Some((pkg, path)) = line.split_once(' ') {
+                launcher.entry(pkg.to_owned()).or_insert_with(|| path.to_owned());
+            }
+        }
+    }
+    let as_dependency: HashSet<String> = run(&["-Qdq"]).lines().map(str::to_owned).collect();
+
+    items
+        .map(|(source, name)| {
+            let topic = match source {
+                PackageSource::Flatpak => {
+                    let runtime = ["Platform", "Sdk", ".Locale", ".Codecs", ".GL.", ".Extension", ".Gtk3theme"]
+                        .iter().any(|part| name.contains(part));
+                    if runtime { Topic::Libraries } else { Topic::Programs }
+                }
+                _ if launcher.contains_key(name) => Topic::Programs,
+                _ if is_system_name(name) => Topic::System,
+                _ if as_dependency.contains(name) => Topic::Libraries,
+                _ => Topic::Tools,
+            };
+            let icon = match source {
+                PackageSource::Flatpak => Some(name.to_owned()),
+                _ => launcher
+                    .get(name)
+                    .and_then(|path| std::fs::read_to_string(path).ok())
+                    .and_then(|text| {
+                        text.lines().find_map(|l| l.strip_prefix("Icon=").map(|v| v.trim().to_owned()))
+                    })
+                    .or_else(|| Some(name.to_owned())),
+            };
+            ((source, name.to_owned()), Info { topic, icon })
+        })
+        .collect()
+}
+
+/// The app's icon if the theme (or a file path) has it, else a generic package.
+fn package_icon(wanted: Option<&str>, name: &str) -> gtk::Image {
+    let theme = gtk::gdk::Display::default().map(|d| gtk::IconTheme::for_display(&d));
+    let image = match wanted {
+        Some(path) if path.starts_with('/') && std::path::Path::new(path).is_file() => gtk::Image::from_file(path),
+        _ => {
+            let found = [wanted, Some(name)]
+                .into_iter()
+                .flatten()
+                .find(|icon| !icon.starts_with('/') && theme.as_ref().map_or(false, |t| t.has_icon(icon)));
+            gtk::Image::from_icon_name(found.unwrap_or("package-x-generic-symbolic"))
+        }
+    };
+    image.set_pixel_size(32);
+    image.set_margin_end(6);
+    image
+}
+
+fn update_button_label(filter: u32) -> &'static str {
+    match filter {
+        1 => t("Update System"),
+        2 => t("Update AUR"),
+        3 => t("Update Programs"),
+        _ => t("Update All"),
     }
 }
 
