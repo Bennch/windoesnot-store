@@ -13,6 +13,8 @@ const DE: &[(&str, &str)] = &[
     ("Apps & updates", "Apps & Updates"),
     ("One transaction at a time", "Immer nur ein Vorgang gleichzeitig"),
     ("Queue ({})", "Warteschlange ({})"),
+    ("Add all to queue", "Alle zur Warteschlange"),
+    ("{} apps from setup are waiting: {}", "{} Programme aus der Einrichtung warten: {}"),
     ("Queue (0)", "Warteschlange (0)"),
     // Home
     ("Loading package summary...", "Paketübersicht wird geladen …"),

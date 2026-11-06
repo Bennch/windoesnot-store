@@ -6,6 +6,7 @@ pub mod icons;
 pub mod installation;
 pub mod models;
 pub mod news;
+pub mod pending;
 pub mod providers;
 pub mod syncdb;
 pub mod runner;

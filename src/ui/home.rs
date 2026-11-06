@@ -9,6 +9,7 @@ use glib::ControlFlow;
 use gtk::prelude::*;
 
 use crate::core::installation::InstalledApps;
+use crate::core::pending::{self, PendingApp};
 use crate::core::models::{PackageSource, PackageSummary};
 use crate::i18n::{t, tf};
 use crate::ui::home_data::{self, Category, HomeApp};
@@ -25,6 +26,9 @@ pub struct HomePage {
     pub open_updates_btn: gtk::Button,
     pub open_installed_btn: gtk::Button,
     summary_label: gtk::Label,
+    /// Apps picked in the installer that still wait for the user (repository / AUR).
+    pending: adw::Banner,
+    waiting: Rc<RefCell<Vec<PendingApp>>>,
     carousel: adw::Carousel,
     categories: gtk::Grid,
     /// Big search field; Enter hands the text to the Search page.
@@ -68,6 +72,11 @@ impl HomePage {
         title.add_css_class("page-title");
         title.set_xalign(0.0);
         content.append(&title);
+
+        let pending = adw::Banner::new("");
+        pending.set_button_label(Some(t("Add all to queue")));
+        pending.set_revealed(false);
+        content.append(&pending);
 
         let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some(t("Search apps and packages")));
@@ -161,6 +170,8 @@ impl HomePage {
             open_updates_btn,
             open_installed_btn,
             summary_label,
+            pending,
+            waiting: Rc::new(RefCell::new(Vec::new())),
             carousel,
             categories,
             search,
@@ -200,9 +211,23 @@ impl HomePage {
         self.bind_quick_search(&ctx, &handles);
 
         self.refresh_installed(ctx.clone());
+        self.refresh_pending(ctx.clone(), handles.clone());
         let page = self.clone();
         let ctx_for_refresh = ctx.clone();
-        handles.queue.connect_finished(move || page.refresh_installed(ctx_for_refresh.clone()));
+        let handles_for_refresh = handles.clone();
+        handles.queue.connect_finished(move || {
+            page.refresh_installed(ctx_for_refresh.clone());
+            page.refresh_pending(ctx_for_refresh.clone(), handles_for_refresh.clone());
+        });
+        let (banner, queue, waiting) = (self.pending.clone(), handles.queue.clone(), self.waiting.clone());
+        banner.connect_button_clicked(move |banner| {
+            for app in waiting.borrow().iter() {
+                for (name, source, origin) in &app.actions {
+                    queue.add_install(name.clone(), *source, origin.clone());
+                }
+            }
+            banner.set_revealed(false);
+        });
         refresh_summary(self.summary_label.clone(), ctx);
     }
 
@@ -452,6 +477,37 @@ impl HomePage {
         scroller.set_child(Some(&content));
         let page = adw::NavigationPage::builder().title(category.label()).child(&scroller).build();
         handles.nav_view.push(&page);
+    }
+
+    /// Shows the apps from the installer that are still missing, e.g. Ollama or an AUR tool.
+    fn refresh_pending(&self, ctx: AppContext, _handles: UiHandles) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let german = crate::desktop::language() == crate::desktop::Language::De;
+            let waiting = pending::load(german);
+            if waiting.is_empty() {
+                let _ = tx.send(Vec::new());
+                return;
+            }
+            let installed = ctx.installed_apps();
+            let open: Vec<PendingApp> = waiting
+                .into_iter()
+                .filter(|app| app.actions.iter().any(|(name, _, _)| installed.find(name, Some(name)).is_empty()))
+                .collect();
+            let _ = tx.send(open);
+        });
+        let (banner, store) = (self.pending.clone(), self.waiting.clone());
+        glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+            Ok(open) => {
+                let names: Vec<String> = open.iter().map(|app| app.name.clone()).collect();
+                banner.set_title(&tf("{} apps from setup are waiting: {}", &[&open.len(), &names.join(", ")]));
+                banner.set_revealed(!open.is_empty());
+                *store.borrow_mut() = open;
+                ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+        });
     }
 
     fn refresh_installed(&self, ctx: AppContext) {
