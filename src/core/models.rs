@@ -263,6 +263,7 @@ impl TerminalEmulator {
 pub struct Settings {
     pub aur_helper: AurHelperKind,
     pub allow_noconfirm: bool,
+    pub immediate_actions: bool,
     pub theme: ThemeMode,
     pub terminal_mode: TerminalMode,
     pub terminal_emulator: TerminalEmulator,
@@ -280,6 +281,7 @@ impl Default for Settings {
         Self {
             aur_helper: AurHelperKind::Yay,
             allow_noconfirm: false,
+            immediate_actions: false,
             theme: ThemeMode::System,
             terminal_mode: TerminalMode::Integrated,
             terminal_emulator: TerminalEmulator::Auto,
@@ -291,6 +293,12 @@ impl Default for Settings {
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+
+    #[test]
+    fn existing_settings_keep_queue_mode_by_default() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.immediate_actions);
+    }
 
     fn action(name: &str, source: PackageSource, kind: ActionKind) -> TransactionAction {
         TransactionAction { name: name.into(), source, kind, origin: None }

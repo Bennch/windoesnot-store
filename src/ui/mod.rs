@@ -118,26 +118,42 @@ impl QueueController {
     }
 
     pub fn add_install(&self, name: String, source: PackageSource, origin: Option<String>) {
-        let mut queue = self.ctx.queue.lock().unwrap();
-        queue.push(TransactionAction {
+        let action = TransactionAction {
             name,
             source,
             kind: ActionKind::Install,
             origin,
-        });
+        };
+        let immediate = self.ctx.settings.lock().unwrap().immediate_actions;
+        if immediate {
+            if matches!(source, PackageSource::Repo | PackageSource::Aur) {
+                self.show_review_dialog_for(Some(TransactionQueue { actions: vec![action] }));
+            } else {
+                self.execute_action(action);
+            }
+            return;
+        }
+        let mut queue = self.ctx.queue.lock().unwrap();
+        queue.push(action);
         drop(queue);
         self.update_label();
         self.toast(t("Added to queue"));
     }
 
     pub fn add_remove(&self, name: String, source: PackageSource) {
-        let mut queue = self.ctx.queue.lock().unwrap();
-        queue.push(TransactionAction {
+        let action = TransactionAction {
             name,
             source,
             kind: ActionKind::Remove,
             origin: None,
-        });
+        };
+        let immediate = self.ctx.settings.lock().unwrap().immediate_actions;
+        if immediate {
+            self.execute_action(action);
+            return;
+        }
+        let mut queue = self.ctx.queue.lock().unwrap();
+        queue.push(action);
         drop(queue);
         self.update_label();
         self.toast(t("Added to queue"));
@@ -203,7 +219,22 @@ impl QueueController {
     }
 
     pub fn show_review_dialog(&self) {
-        let queue = self.ctx.queue.lock().unwrap().clone();
+        self.show_review_dialog_for(None);
+    }
+
+    fn execute_action(&self, action: TransactionAction) {
+        let queue = TransactionQueue { actions: vec![action] };
+        let plan = match plan_transactions(&queue, &self.ctx.settings.lock().unwrap()) {
+            Ok(plan) => plan,
+            Err(err) => { self.toast(&err.to_string()); return; }
+        };
+        run_plan(plan, &self.ctx, &self.log_drawer, &self.parent, &self.toasts, &self.finished);
+    }
+
+    fn show_review_dialog_for(&self, immediate_queue: Option<TransactionQueue>) {
+        let immediate_queue = immediate_queue.map(|queue| Rc::new(RefCell::new(queue)));
+        let queue = immediate_queue.as_ref().map(|queue| queue.borrow().clone())
+            .unwrap_or_else(|| self.ctx.queue.lock().unwrap().clone());
         if queue.is_empty() {
             let dialog = adw::MessageDialog::new(
                 Some(&self.parent),
@@ -309,16 +340,20 @@ impl QueueController {
                 check.connect_clicked(move |_| aur_review::show(&dialog_for_check, name.clone()));
                 check
             });
-            let (controller, content_for_row, row_for_remove, dialog_for_row, action) =
-                (self.clone(), content.clone(), row.clone(), dialog.clone(), action.clone());
+            let (controller, content_for_row, row_for_remove, dialog_for_row, action, local_queue) =
+                (self.clone(), content.clone(), row.clone(), dialog.clone(), action.clone(), immediate_queue.clone());
             remove.connect_clicked(move |_| {
-                let empty = {
+                let empty = if let Some(queue) = &local_queue {
+                    let mut queue = queue.borrow_mut();
+                    queue.remove(&action.name, action.source, action.kind);
+                    queue.is_empty()
+                } else {
                     let mut queue = controller.ctx.queue.lock().unwrap();
                     queue.remove(&action.name, action.source, action.kind);
                     queue.is_empty()
                 };
                 content_for_row.remove(&row_for_remove);
-                controller.update_label();
+                if local_queue.is_none() { controller.update_label(); }
                 if empty {
                     dialog_for_row.close();
                 }
@@ -418,12 +453,14 @@ impl QueueController {
         let button = self.button.clone();
         let toasts = self.toasts.clone();
         let finished = self.finished.clone();
+        let local_queue = immediate_queue.clone();
 
         dialog.connect_response(None, move |d: &adw::MessageDialog, resp| {
             if resp == "execute" {
                 crate::core::news::mark_read(&shown_news.borrow());
                 // Entries may have been removed in this dialog.
-                let queue = ctx.queue.lock().unwrap().clone();
+                let queue = local_queue.as_ref().map(|queue| queue.borrow().clone())
+                    .unwrap_or_else(|| ctx.queue.lock().unwrap().clone());
                 let plan = match plan_transactions(&queue, &ctx.settings.lock().unwrap()) {
                     Ok(plan) => plan,
                     Err(err) => {
@@ -433,7 +470,7 @@ impl QueueController {
                     }
                 };
                 let started = run_plan(plan, &ctx, &log_drawer, &parent, &toasts, &finished);
-                if started {
+                if started && local_queue.is_none() {
                     ctx.queue.lock().unwrap().clear();
                     button.set_label(t("Queue (0)"));
                 }
@@ -688,6 +725,7 @@ pub fn build_ui(app: &adw::Application) {
     let nav_for_sidebar = nav_view.clone();
     let main_page_for_sidebar = main_page.clone();
     let updates_for_sidebar = updates_page.clone();
+    let installed_for_sidebar = installed_page.clone();
     // GTK re-emits row-selected for the current row when focus moves, e.g. when
     // a details page is pushed; returning to the main page then would close it
     // again at once. Only a changed selection switches pages here; clicking the
@@ -712,7 +750,7 @@ pub fn build_ui(app: &adw::Application) {
                 1 => stack_for_sidebar.set_visible_child_name("search"),
                 2 => {
                     stack_for_sidebar.set_visible_child_name("installed");
-                    installed_page.refresh(ctx_for_sidebar.clone(), handles_for_sidebar.clone());
+                    installed_for_sidebar.refresh(ctx_for_sidebar.clone(), handles_for_sidebar.clone());
                 }
                 3 => {
                     stack_for_sidebar.set_visible_child_name("updates");
@@ -754,13 +792,17 @@ pub fn build_ui(app: &adw::Application) {
         aur_updates.refresh(aur_context.clone(), None);
     });
     search_page.bind_search(ctx.clone(), handles.clone(), stack.clone());
-    // Opening Search, from the sidebar or the home page, lands in the search field.
+    // Opening a page lands in its own search field.
     let entry_for_focus = search_page.entry.clone();
     let home_entry_for_focus = home_page.search.clone();
+    let installed_entry_for_focus = installed_page.search.clone();
+    let updates_entry_for_focus = updates_page.search.clone();
     stack.connect_visible_child_name_notify(move |stack| {
         let entry = match stack.visible_child_name().as_deref() {
             Some("search") => entry_for_focus.clone(),
             Some("home") => home_entry_for_focus.clone(),
+            Some("installed") => installed_entry_for_focus.clone(),
+            Some("updates") => updates_entry_for_focus.clone(),
             _ => return,
         };
         glib::idle_add_local_once(move || {
@@ -768,6 +810,40 @@ pub fn build_ui(app: &adw::Application) {
             entry.set_position(-1);
         });
     });
+
+    // If a result or filter button has focus, typing still starts a search on
+    // the current page. Leave shortcuts and actual text editors alone.
+    let type_to_search = gtk::EventControllerKey::new();
+    type_to_search.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (stack_for_keys, nav_for_keys, main_for_keys) = (stack.clone(), nav_view.clone(), main_page.clone());
+    let (home_for_keys, search_for_keys) = (home_page.search.clone(), search_page.entry.clone());
+    let (installed_for_keys, updates_for_keys) = (installed_page.search.clone(), updates_page.search.clone());
+    let window_for_keys = window.clone();
+    type_to_search.connect_key_pressed(move |_, key, _, modifiers| {
+        if nav_for_keys.visible_page().as_ref() != Some(&main_for_keys)
+            || modifiers.intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK)
+            || gtk::prelude::GtkWindowExt::focus(&window_for_keys)
+                .is_some_and(|focus| focus.is::<gtk::Editable>() || focus.is::<gtk::TextView>())
+        {
+            return glib::Propagation::Proceed;
+        }
+        let Some(character) = key.to_unicode().filter(|c| !c.is_control() && !c.is_whitespace()) else {
+            return glib::Propagation::Proceed;
+        };
+        let entry = match stack_for_keys.visible_child_name().as_deref() {
+            Some("home") => &home_for_keys,
+            Some("search") => &search_for_keys,
+            Some("installed") => &installed_for_keys,
+            Some("updates") => &updates_for_keys,
+            _ => return glib::Propagation::Proceed,
+        };
+        entry.grab_focus();
+        let mut position = -1;
+        entry.insert_text(&character.to_string(), &mut position);
+        entry.set_position(position);
+        glib::Propagation::Stop
+    });
+    window.add_controller(type_to_search);
 
     // Enter in the home search field continues on the Search page.
     let (sidebar_for_home_enter, search_entry_for_home) = (sidebar.clone(), search_page.entry.clone());
@@ -824,7 +900,19 @@ pub fn build_ui(app: &adw::Application) {
     });
     app.add_action(&open_action);
 
+    // The initial "home" selection happens before the stack's focus handler
+    // is connected, so it needs its own first-window focus.
+    if START_PAGE.get().is_none() {
+        gtk::prelude::GtkWindowExt::set_focus(&window, Some(&home_page.search));
+    }
     window.present();
+    if START_PAGE.get().is_none() {
+        let initial_search = home_page.search.clone();
+        glib::idle_add_local_once(move || {
+            initial_search.grab_focus();
+            initial_search.set_position(-1);
+        });
+    }
     if START_PAGE.get() == Some(&"upgrade") {
         let controller = queue_controller.clone();
         glib::idle_add_local_once(move || {
@@ -1104,6 +1192,7 @@ fn run_plan(
 
     log_drawer.clear();
     log_drawer.set_visible(true);
+    log_drawer.begin_transaction();
 
     let commands = Rc::new(RefCell::new(plan.commands));
     let ctx_clone = ctx.clone();
@@ -1151,6 +1240,8 @@ fn run_plan(
         let mut cmds = commands.borrow_mut();
         if cmds.is_empty() {
             *in_progress.lock().unwrap() = false;
+            log_drawer.append_line(t("Transactions complete"), ctx_clone.runner.log_limit);
+            log_drawer.finish_transaction(true);
             notify_finished();
             log_drawer.set_cancel_handler(None::<fn()>);
             let dialog = adw::MessageDialog::new(
@@ -1165,6 +1256,7 @@ fn run_plan(
             return;
         }
         let cmd = cmds.remove(0);
+        log_drawer.begin_command();
         let interactive = !cmd.args.iter().any(|arg| arg == "--noconfirm");
         let command_trace = format!("$ {}", cmd.display_line());
         let (tx, rx) = mpsc::channel();
@@ -1196,6 +1288,7 @@ fn run_plan(
             Ok(h) => h,
             Err(err) => {
                 *in_progress.lock().unwrap() = false;
+                log_drawer.finish_transaction(false);
                 notify_finished();
                 log_drawer.set_cancel_handler(None::<fn()>);
                 toasts.add_toast(adw::Toast::new(t("Failed to start command")));
@@ -1221,6 +1314,7 @@ fn run_plan(
             Ok(event) => {
                 match event {
                     LogEvent::Line(line) => {
+                        log_drawer.observe_line(&line);
                         if allow_prompt_dialog && should_prompt(&line) && !*prompt_open.borrow() {
                             *prompt_open.borrow_mut() = true;
                             show_prompt_dialog(
@@ -1253,6 +1347,8 @@ fn run_plan(
                         *current_handle.borrow_mut() = None;
                         if code != 0 {
                             *in_progress.lock().unwrap() = false;
+                            log_drawer.append_line(&tf("Command failed ({})", &[&code]), log_limit);
+                            log_drawer.finish_transaction(false);
                             notify_finished();
                             log_drawer.set_cancel_handler(None::<fn()>);
                             toasts.add_toast(adw::Toast::new(&tf(
@@ -1287,6 +1383,7 @@ fn run_plan(
             Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 *in_progress.lock().unwrap() = false;
+                log_drawer.finish_transaction(false);
                 notify_finished();
                 log_drawer.set_cancel_handler(None::<fn()>);
                 ControlFlow::Break
@@ -1873,6 +1970,29 @@ fn themed_css(theme: ThemeMode) -> String {
             background-color: $CARD_FROM$;
             color: $TEXT$;
             font-family: monospace;
+        }
+        .transaction-progress-panel {
+            background-color: $SIDEBAR_FROM$;
+            color: $TEXT$;
+        }
+        .transaction-progress-status {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .transaction-progress-value {
+            color: @accent_color;
+            font-size: 14px;
+            font-weight: 800;
+        }
+        progressbar.transaction-progress > trough {
+            min-height: 16px;
+            border-radius: 8px;
+            background-color: $DIVIDER$;
+        }
+        progressbar.transaction-progress > trough > progress {
+            min-height: 16px;
+            border-radius: 8px;
+            background-color: @accent_bg_color;
         }
         .log-resize-handle {
             min-height: 6px;

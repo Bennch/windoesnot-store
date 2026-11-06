@@ -152,6 +152,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     sources_list.set_selection_mode(gtk::SelectionMode::None);
     sources_list.set_visible(false);
     let chosen: Rc<RefCell<Option<SourceOption>>> = Rc::new(RefCell::new(None));
+    let available_sources: Rc<RefCell<Vec<SourceOption>>> = Rc::new(RefCell::new(Vec::new()));
 
     root.append(&back_btn);
     root.append(&header);
@@ -219,9 +220,11 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let icon_slot = icon.clone();
 
     let summary_source = summary.source;
+    let flatpak_id_for_refresh = flatpak_id.clone();
     let sources_heading_clone = sources_heading.clone();
     let sources_list_clone = sources_list.clone();
     let chosen_clone = chosen.clone();
+    let available_sources_for_load = available_sources.clone();
     let system_note_clone = system_note.clone();
     let (tx, rx) = mpsc::channel();
     let (update_tx, update_rx) = mpsc::channel();
@@ -247,6 +250,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 let info = info.unwrap_or_default();
                 spinner_clone.stop();
                 loading_clone.set_visible(false);
+                *available_sources_for_load.borrow_mut() = options.clone();
                 fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone, &system_note_clone, pending);
                 // Installed: the button removes, so choosing a source is moot.
                 let pick_source = found.is_empty() && !options.is_empty();
@@ -323,6 +327,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         }
     });
 
+    let update_status_for_initial = update_status.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
         match update_rx.try_recv() {
             Ok(update) => {
@@ -352,8 +357,8 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     update_banner_for_status.set_revealed(true);
                     update_btn_for_status.set_visible(true);
                 } else if !installations_clone_for_status.borrow().is_empty() {
-                    update_status.set_text(t("No update found in current package data"));
-                    update_status.set_visible(true);
+                    update_status_for_initial.set_text(t("No update found in current package data"));
+                    update_status_for_initial.set_visible(true);
                 }
                 glib::ControlFlow::Break
             }
@@ -364,6 +369,75 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 glib::ControlFlow::Break
             }
         }
+    });
+
+    // The page can stay open while its queued install finishes. Re-read the
+    // package database instead of keeping the state captured when it opened.
+    let page_for_refresh = page.downgrade();
+    let ctx_for_refresh = ctx.clone();
+    let name_for_refresh = summary.name.clone();
+    let installations_for_refresh = installations.clone();
+    let action_for_refresh = action_btn.clone();
+    let installed_for_refresh = installed.clone();
+    let sources_heading_for_refresh = sources_heading.clone();
+    let sources_list_for_refresh = sources_list.clone();
+    let system_note_for_refresh = system_note.clone();
+    let available_sources_for_refresh = available_sources.clone();
+    let chosen_for_refresh = chosen.clone();
+    let update_btn_for_refresh = update_btn.clone();
+    let update_banner_for_refresh = update_banner.clone();
+    let update_status_for_refresh = update_status.clone();
+    let pending_update_for_refresh = pending_update.clone();
+    handles.queue.connect_finished(move || {
+        if page_for_refresh.upgrade().is_none() { return; }
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx_for_refresh.clone();
+        let name = name_for_refresh.clone();
+        let flatpak_id = flatpak_id_for_refresh.clone();
+        std::thread::spawn(move || {
+            let found = ctx.installed_apps().find(&name, flatpak_id.as_deref());
+            let pending = if found.is_empty() { updates::collect_pacman_updates().len() } else { 0 };
+            let _ = tx.send((found, pending));
+        });
+        let installations = installations_for_refresh.clone();
+        let action = action_for_refresh.clone();
+        let installed = installed_for_refresh.clone();
+        let sources_heading = sources_heading_for_refresh.clone();
+        let sources_list = sources_list_for_refresh.clone();
+        let system_note = system_note_for_refresh.clone();
+        let available_sources = available_sources_for_refresh.clone();
+        let chosen = chosen_for_refresh.clone();
+        let update_btn = update_btn_for_refresh.clone();
+        let update_banner = update_banner_for_refresh.clone();
+        let update_status = update_status_for_refresh.clone();
+        let pending_update = pending_update_for_refresh.clone();
+        let page = page_for_refresh.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || match rx.try_recv() {
+            Ok((found, pending)) => {
+                if page.upgrade().is_some() {
+                    installed.set_subtitle(&markup_escape(&installed_value(&found)));
+                    action.set_label(&match preferred(&found, summary_source) {
+                        Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
+                        None => t("Install").to_string(),
+                    });
+                    let options = available_sources.borrow();
+                    fill_sources(&sources_list, &options, &found, summary_source, &chosen, &system_note, pending);
+                    let choose_source = found.is_empty() && !options.is_empty();
+                    sources_heading.set_visible(choose_source);
+                    sources_list.set_visible(choose_source);
+                    if found.is_empty() {
+                        update_btn.set_visible(false);
+                        update_banner.set_revealed(false);
+                        update_status.set_visible(false);
+                        *pending_update.borrow_mut() = None;
+                    }
+                    *installations.borrow_mut() = found;
+                }
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        });
     });
 
     let queue = handles.queue.clone();
@@ -439,7 +513,7 @@ fn source_options(ctx: &AppContext, summary: &PackageSummary, flatpak_id: Option
     sources::find(&summary.name, flatpak_id, known, &lookups)
 }
 
-/// One row per source with a radio button; the page's own source is preselected.
+/// One row per source with a radio button; prefer Flatpak for a new install.
 fn fill_sources(
     list: &gtk::ListBox,
     options: &[SourceOption],
@@ -451,10 +525,10 @@ fn fill_sources(
 ) {
     // The note matters for a new native install only (not for Flatpak, not once installed).
     let not_installed = found.is_empty();
-    // Repository and AUR installs always update the whole system first. While updates
-    // are waiting, only Flatpak avoids that, so it is the one to recommend and preselect.
+    // Native installs update the whole system even when no updates are currently
+    // waiting. Recommend Flatpak whenever it is available for a new install.
     let flatpak_offered = options.iter().any(|option| option.source == PackageSource::Flatpak);
-    let prefer_flatpak = not_installed && pending_updates > 0 && flatpak_offered;
+    let prefer_flatpak = not_installed && flatpak_offered;
     let preselect = if prefer_flatpak { PackageSource::Flatpak } else { preselect };
     while let Some(row) = list.first_child() {
         list.remove(&row);
@@ -467,6 +541,7 @@ fn fill_sources(
                 t("System package sources"),
                 tf("Updates the whole system first: {} updates are waiting, this can take a while.", &[&pending_updates]),
             ),
+            PackageSource::Repo if prefer_flatpak => (t("System package sources"), t("Installing this also updates the whole system.").to_string()),
             PackageSource::Repo => (t("System package sources (recommended)"), t("Checked by the distribution and updated together with the system.").to_string()),
             PackageSource::Flatpak if prefer_flatpak => (
                 t("Flathub (Flatpak) (recommended)"),
@@ -477,7 +552,7 @@ fn fill_sources(
                 t("AUR (community)"),
                 tf("Updates the whole system first ({} updates are waiting) and is built on this computer.", &[&pending_updates]),
             ),
-            PackageSource::Aur => (t("AUR (community)"), t("Maintained by users and built on this computer.").to_string()),
+            PackageSource::Aur => (t("AUR (community)"), t("Installing this also updates the whole system.").to_string()),
         };
         let mut facts = vec![tf("Version {}", &[&option.version])];
         if let Some(size) = &option.size {

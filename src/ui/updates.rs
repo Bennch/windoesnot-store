@@ -27,7 +27,7 @@ pub struct UpdatesPage {
     spinner: gtk::Spinner,
     error_label: gtk::Label,
     generation: Rc<std::cell::Cell<u64>>,
-    search: gtk::SearchEntry,
+    pub search: gtk::SearchEntry,
     source_filter: gtk::DropDown,
     topic_filter: gtk::DropDown,
     topics: Rc<RefCell<HashMap<(PackageSource, String), Info>>>,

@@ -214,6 +214,13 @@ const DE: &[(&str, &str)] = &[
     ("Command failed ({})", "Befehl fehlgeschlagen ({})"),
     // Logs
     ("Logs", "Protokoll"),
+    ("Progress", "Fortschritt"),
+    ("Activity", "Vorgang"),
+    ("Show Logs", "Protokoll anzeigen"),
+    ("Hide Logs", "Protokoll ausblenden"),
+    ("Working…", "Wird ausgeführt …"),
+    ("Start actions immediately", "Aktionen sofort starten"),
+    ("Install and remove directly instead of adding to the queue. System updates still require confirmation.", "Installieren und Entfernen sofort starten statt zur Warteschlange hinzuzufügen. Systemupdates müssen weiterhin bestätigt werden."),
     ("Cancel the running transaction", "Laufenden Vorgang abbrechen"),
     ("Copy", "Kopieren"),
     ("Save", "Speichern"),

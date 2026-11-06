@@ -16,7 +16,7 @@ use crate::i18n::t;
 pub struct InstalledPage {
     pub root: gtk::Box,
     list: gtk::ListBox,
-    search: gtk::SearchEntry,
+    pub search: gtk::SearchEntry,
     filter: gtk::DropDown,
     topic_filter: gtk::DropDown,
     topics: Rc<RefCell<HashMap<(PackageSource, String), Info>>>,

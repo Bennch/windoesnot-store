@@ -16,6 +16,7 @@ pub struct SettingsPage {
     aur_switch: adw::SwitchRow,
     helper_row: adw::ComboRow,
     noconfirm_row: adw::SwitchRow,
+    immediate_actions_row: adw::SwitchRow,
     clear_cache: gtk::Button,
     about_btn: gtk::Button,
 }
@@ -76,6 +77,10 @@ impl SettingsPage {
         noconfirm_row.set_title(t("Allow --noconfirm"));
         noconfirm_row.set_subtitle(t("Applies to external terminal mode. Integrated logs are always non-interactive."));
 
+        let immediate_actions_row = adw::SwitchRow::new();
+        immediate_actions_row.set_title(t("Start actions immediately"));
+        immediate_actions_row.set_subtitle(t("Install and remove directly instead of adding to the queue. System updates still require confirmation."));
+
         let cache_group = adw::PreferencesGroup::new();
         cache_group.set_title(t("Cache"));
         let clear_cache = gtk::Button::with_label(t("Clear screenshots cache"));
@@ -96,6 +101,7 @@ impl SettingsPage {
         group.add(&aur_switch);
         group.add(&helper_row);
         group.add(&noconfirm_row);
+        group.add(&immediate_actions_row);
         cache_group.add(&cache_row);
 
         root.add(&appearance_group);
@@ -111,6 +117,7 @@ impl SettingsPage {
             aur_switch,
             helper_row,
             noconfirm_row,
+            immediate_actions_row,
             clear_cache,
             about_btn,
         }
@@ -136,6 +143,7 @@ impl SettingsPage {
             self.helper_row.set_subtitle(t("No AUR helper installed. Install paru or yay to use AUR."));
         }
         self.noconfirm_row.set_active(settings.allow_noconfirm);
+        self.immediate_actions_row.set_active(settings.immediate_actions);
 
         let ctx_clone = ctx.clone();
         self.theme_row
@@ -225,6 +233,13 @@ impl SettingsPage {
         self.noconfirm_row.connect_active_notify(move |row| {
             let mut settings = ctx_clone.settings.lock().unwrap();
             settings.allow_noconfirm = row.is_active();
+            let _ = save_settings(&settings);
+        });
+
+        let ctx_clone = ctx.clone();
+        self.immediate_actions_row.connect_active_notify(move |row| {
+            let mut settings = ctx_clone.settings.lock().unwrap();
+            settings.immediate_actions = row.is_active();
             let _ = save_settings(&settings);
         });
 

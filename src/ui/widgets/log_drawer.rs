@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
@@ -17,6 +17,12 @@ const LOG_RESIZE_HANDLE_HEIGHT: i32 = 10;
 pub struct LogDrawer {
     root: gtk::Box,
     scroller: gtk::ScrolledWindow,
+    log_toggle: gtk::ToggleButton,
+    progress: gtk::ProgressBar,
+    progress_status: gtk::Label,
+    progress_value: gtk::Label,
+    progress_running: Rc<Cell<bool>>,
+    progress_determinate: Rc<Cell<bool>>,
     buffer: gtk::TextBuffer,
     text_view: gtk::TextView,
     lines: Rc<RefCell<Vec<String>>>,
@@ -34,23 +40,21 @@ impl LogDrawer {
         header.set_margin_start(8);
         header.set_margin_end(8);
 
-        let title = gtk::Label::new(Some(t("Logs")));
-        title.add_css_class("title-4");
-        title.set_xalign(0.0);
+        let log_toggle = gtk::ToggleButton::with_label(t("Show Logs"));
 
         let minimize_btn = gtk::Button::from_icon_name("pan-down-symbolic");
         let close_btn = gtk::Button::from_icon_name("window-close-symbolic");
         let cancel_btn = gtk::Button::with_label(t("Cancel"));
         cancel_btn.add_css_class("destructive-action");
         cancel_btn.set_sensitive(false);
+        cancel_btn.set_visible(false);
         cancel_btn.set_tooltip_text(Some(t("Cancel the running transaction")));
         let copy_btn = gtk::Button::with_label(t("Copy"));
         let save_btn = gtk::Button::with_label(t("Save"));
         let clear_btn = gtk::Button::with_label(t("Clear"));
         let clear_lock_btn = gtk::Button::with_label(t("Clear Lock"));
 
-        header.append(&title);
-        header.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        header.append(&log_toggle);
         header.append(&minimize_btn);
         header.append(&close_btn);
         header.append(&cancel_btn);
@@ -81,6 +85,35 @@ impl LogDrawer {
         scroller.set_child(Some(&text_view));
         Self::set_scroller_height(&scroller, DEFAULT_LOG_HEIGHT);
 
+        let progress_panel = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        progress_panel.add_css_class("transaction-progress-panel");
+        progress_panel.set_margin_start(16);
+        progress_panel.set_margin_end(16);
+        progress_panel.set_margin_top(12);
+        progress_panel.set_margin_bottom(14);
+        let progress_line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let progress_status = gtk::Label::new(Some(t("Working…")));
+        progress_status.add_css_class("transaction-progress-status");
+        progress_status.set_wrap(true);
+        progress_status.set_lines(2);
+        progress_status.set_xalign(0.0);
+        progress_status.set_hexpand(true);
+        let progress_value = gtk::Label::new(Some("…"));
+        progress_value.add_css_class("transaction-progress-value");
+        progress_value.set_valign(gtk::Align::Start);
+        progress_line.append(&progress_status);
+        progress_line.append(&progress_value);
+        let progress = gtk::ProgressBar::new();
+        progress.add_css_class("transaction-progress");
+        progress.set_hexpand(true);
+        progress.set_show_text(false);
+        progress_panel.append(&progress_line);
+        progress_panel.append(&progress);
+        let log_revealer = gtk::Revealer::new();
+        log_revealer.set_reveal_child(false);
+        log_revealer.set_transition_type(gtk::RevealerTransitionType::SlideUp);
+        log_revealer.set_child(Some(&scroller));
+
         let resize_handle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         resize_handle.add_css_class("log-resize-handle");
         resize_handle.set_height_request(LOG_RESIZE_HANDLE_HEIGHT);
@@ -93,9 +126,10 @@ impl LogDrawer {
         root.set_hexpand(true);
         root.set_halign(gtk::Align::Fill);
         root.set_valign(gtk::Align::End);
-        root.append(&resize_handle);
         root.append(&header);
-        root.append(&scroller);
+        root.append(&progress_panel);
+        root.append(&resize_handle);
+        root.append(&log_revealer);
         root.set_visible(false);
 
         let lines = Rc::new(RefCell::new(Vec::new()));
@@ -263,6 +297,28 @@ impl LogDrawer {
         });
         resize_handle.add_controller(drag_resize);
 
+        let (resize_for_view, minimize_for_view) = (resize_handle.clone(), minimize_btn.clone());
+        let (copy_for_view, save_for_view, clear_for_view, lock_for_view) =
+            (copy_btn.clone(), save_btn.clone(), clear_btn.clone(), clear_lock_btn.clone());
+        let revealer_for_toggle = log_revealer.clone();
+        log_toggle.connect_toggled(move |button| {
+            let logs = button.is_active();
+            button.set_label(t(if logs { "Hide Logs" } else { "Show Logs" }));
+            revealer_for_toggle.set_reveal_child(logs);
+            resize_for_view.set_visible(logs);
+            minimize_for_view.set_visible(logs);
+            copy_for_view.set_visible(logs);
+            save_for_view.set_visible(logs);
+            clear_for_view.set_visible(logs);
+            lock_for_view.set_visible(logs);
+        });
+        resize_handle.set_visible(false);
+        minimize_btn.set_visible(false);
+        copy_btn.set_visible(false);
+        save_btn.set_visible(false);
+        clear_btn.set_visible(false);
+        clear_lock_btn.set_visible(false);
+
         let root_hide = root.clone();
         close_btn.connect_clicked(move |_| {
             root_hide.set_visible(false);
@@ -271,6 +327,12 @@ impl LogDrawer {
         Self {
             root,
             scroller,
+            log_toggle,
+            progress,
+            progress_status,
+            progress_value,
+            progress_running: Rc::new(Cell::new(false)),
+            progress_determinate: Rc::new(Cell::new(false)),
             buffer,
             text_view,
             lines,
@@ -293,7 +355,7 @@ impl LogDrawer {
         let button = gtk::ToggleButton::new();
         let label = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         label.append(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
-        label.append(&gtk::Label::new(Some(t("Logs"))));
+        label.append(&gtk::Label::new(Some(t("Activity"))));
         button.set_child(Some(&label));
         button.set_active(self.is_visible());
         let drawer = self.clone();
@@ -313,6 +375,48 @@ impl LogDrawer {
 
     pub fn append_line(&self, line: &str, limit: usize) {
         Self::append_line_internal(&self.lines, &self.buffer, &self.text_view, line, limit);
+    }
+
+    pub fn begin_transaction(&self) {
+        self.progress_running.set(true);
+        self.log_toggle.set_active(false);
+        self.begin_command();
+        let (running, determinate, progress) = (
+            self.progress_running.clone(), self.progress_determinate.clone(), self.progress.clone()
+        );
+        glib::timeout_add_local(std::time::Duration::from_millis(120), move || {
+            if !running.get() { return glib::ControlFlow::Break; }
+            if !determinate.get() { progress.pulse(); }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    pub fn begin_command(&self) {
+        self.progress_determinate.set(false);
+        self.progress.set_fraction(0.0);
+        self.progress_status.set_text(t("Working…"));
+        self.progress_value.set_text("…");
+    }
+
+    pub fn observe_line(&self, line: &str) {
+        self.progress_status.set_text(line);
+        if let Some((done, total)) = parse_pacman_progress(line) {
+            self.progress_determinate.set(true);
+            self.progress.set_fraction(done as f64 / total as f64);
+            self.progress_value.set_text(&format!("{}%", (done as f64 / total as f64 * 100.0).round() as u32));
+        }
+    }
+
+    pub fn finish_transaction(&self, success: bool) {
+        self.progress_running.set(false);
+        self.progress_determinate.set(true);
+        if success {
+            self.progress.set_fraction(1.0);
+            self.progress_value.set_text("100%");
+            self.progress_status.set_text(t("Transactions complete"));
+        } else {
+            self.progress_status.set_text(t("Action failed"));
+        }
     }
 
     pub fn clear(&self) {
@@ -424,6 +528,25 @@ impl LogDrawer {
             }
         }
         "/usr/bin/windoesnot-store-helper".to_string()
+    }
+}
+
+fn parse_pacman_progress(line: &str) -> Option<(u32, u32)> {
+    let numbers = line.trim_start().strip_prefix('(')?.split_once(')')?.0;
+    let (done, total) = numbers.split_once('/')?;
+    let (done, total) = (done.parse::<u32>().ok()?, total.parse::<u32>().ok()?);
+    (total > 0 && done <= total).then_some((done, total))
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::parse_pacman_progress;
+
+    #[test]
+    fn pacman_progress_uses_package_counts() {
+        assert_eq!(parse_pacman_progress("(12/48) installing package"), Some((12, 48)));
+        assert_eq!(parse_pacman_progress("(31/31) Updating the desktop file MIME type cache..."), Some((31, 31)));
+        assert_eq!(parse_pacman_progress("==> Building package"), None);
     }
 }
 
