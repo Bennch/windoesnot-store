@@ -229,7 +229,9 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         let found = ctx_clone.installed_apps().find(&summary_clone.name, flatpak_id.as_deref());
         let options = source_options(&ctx_clone, &summary_clone, flatpak_id.as_deref());
         let (details, info) = load_details(ctx_clone.clone(), summary_clone, appstream, flatpak_id.as_deref());
-        let _ = tx.send((details, found.clone(), options, info));
+        // Waiting system updates decide which source is worth recommending (see fill_sources).
+        let pending = if found.is_empty() { updates::collect_pacman_updates().len() } else { 0 };
+        let _ = tx.send((details, found.clone(), options, info, pending));
         let update = if found.is_empty() {
             None
         } else {
@@ -241,11 +243,11 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
 
     glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
         match rx.try_recv() {
-            Ok((details, found, options, info)) => {
+            Ok((details, found, options, info, pending)) => {
                 let info = info.unwrap_or_default();
                 spinner_clone.stop();
                 loading_clone.set_visible(false);
-                fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone, &system_note_clone);
+                fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone, &system_note_clone, pending);
                 // Installed: the button removes, so choosing a source is moot.
                 let pick_source = found.is_empty() && !options.is_empty();
                 sources_heading_clone.set_visible(pick_source);
@@ -445,18 +447,37 @@ fn fill_sources(
     preselect: PackageSource,
     chosen: &Rc<RefCell<Option<SourceOption>>>,
     system_note: &gtk::Label,
+    pending_updates: usize,
 ) {
     // The note matters for a new native install only (not for Flatpak, not once installed).
     let not_installed = found.is_empty();
+    // Repository and AUR installs always update the whole system first. While updates
+    // are waiting, only Flatpak avoids that, so it is the one to recommend and preselect.
+    let flatpak_offered = options.iter().any(|option| option.source == PackageSource::Flatpak);
+    let prefer_flatpak = not_installed && pending_updates > 0 && flatpak_offered;
+    let preselect = if prefer_flatpak { PackageSource::Flatpak } else { preselect };
     while let Some(row) = list.first_child() {
         list.remove(&row);
     }
     let mut group: Option<gtk::CheckButton> = None;
     for option in options {
+        let waiting = not_installed && pending_updates > 0;
         let (title, hint) = match option.source {
-            PackageSource::Repo => (t("System package sources (recommended)"), t("Checked by the distribution and updated together with the system.")),
-            PackageSource::Flatpak => (t("Flathub (Flatpak)"), t("Runs in its own sandbox and updates separately.")),
-            PackageSource::Aur => (t("AUR (community)"), t("Maintained by users and built on this computer.")),
+            PackageSource::Repo if waiting => (
+                t("System package sources"),
+                tf("Updates the whole system first: {} updates are waiting, this can take a while.", &[&pending_updates]),
+            ),
+            PackageSource::Repo => (t("System package sources (recommended)"), t("Checked by the distribution and updated together with the system.").to_string()),
+            PackageSource::Flatpak if prefer_flatpak => (
+                t("Flathub (Flatpak) (recommended)"),
+                t("No system update needed. Runs in its own sandbox and updates separately.").to_string(),
+            ),
+            PackageSource::Flatpak => (t("Flathub (Flatpak)"), t("Runs in its own sandbox and updates separately.").to_string()),
+            PackageSource::Aur if waiting => (
+                t("AUR (community)"),
+                tf("Updates the whole system first ({} updates are waiting) and is built on this computer.", &[&pending_updates]),
+            ),
+            PackageSource::Aur => (t("AUR (community)"), t("Maintained by users and built on this computer.").to_string()),
         };
         let mut facts = vec![tf("Version {}", &[&option.version])];
         if let Some(size) = &option.size {
