@@ -633,7 +633,7 @@ fn header_label(text: &str, expand: bool, width_chars: i32) -> gtk::Label {
     label
 }
 
-fn collect_pacman_updates() -> Vec<(TransactionAction, String)> {
+pub(crate) fn collect_pacman_updates() -> Vec<(TransactionAction, String)> {
     // Compare against the user's sync copy, like checkupdates; -Qu on the system
     // databases would only see what the last full upgrade downloaded.
     let output = Command::new("pacman")

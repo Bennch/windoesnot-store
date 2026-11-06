@@ -218,15 +218,63 @@ impl QueueController {
 
         let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
         let only_updates = queue.actions.iter().all(|action| action.kind == ActionKind::Upgrade);
-        let dialog = adw::MessageDialog::new(
-            Some(&self.parent),
-            Some(t(if only_updates { "Install updates" } else { "Review Transactions" })),
-            Some(t(if only_updates {
-                "Everything is updated together in one step. Your files and settings stay as they are."
-            } else {
-                "Installing native packages also updates the whole system. Matching WinDoesNot components are required."
-            })),
-        );
+        // A new native package always goes in together with a full system update.
+        let installs_native = queue.actions.iter().any(|action| {
+            action.kind == ActionKind::Install && matches!(action.source, PackageSource::Repo | PackageSource::Aur)
+        });
+        let (heading, body) = if only_updates {
+            (t("Install updates"), t("Everything is updated together in one step. Your files and settings stay as they are."))
+        } else if installs_native {
+            (
+                t("This also updates the whole system"),
+                t("On Arch a new program is installed together with an update of the whole system. Cancel if you do not want to update right now."),
+            )
+        } else {
+            (t("Review Transactions"), t("Installing native packages also updates the whole system. Matching WinDoesNot components are required."))
+        };
+        let dialog = adw::MessageDialog::new(Some(&self.parent), Some(heading), Some(body));
+        if installs_native {
+            // Not just a line of small text: a highlighted notice with the number of waiting updates.
+            let notice = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            notice.add_css_class("card");
+            notice.set_margin_bottom(8);
+            let title = gtk::Label::new(Some(t("Not only this program: the whole system is updated.")));
+            title.add_css_class("heading");
+            title.add_css_class("warning");
+            title.set_xalign(0.0);
+            title.set_wrap(true);
+            title.set_margin_top(8);
+            title.set_margin_start(10);
+            title.set_margin_end(10);
+            let count = gtk::Label::new(Some(t("Counting waiting updates …")));
+            count.set_xalign(0.0);
+            count.set_wrap(true);
+            count.set_margin_start(10);
+            count.set_margin_end(10);
+            let late = gtk::Label::new(Some(t("Once started, this cannot be cancelled and can take several minutes.")));
+            late.add_css_class("dim-label");
+            late.set_xalign(0.0);
+            late.set_wrap(true);
+            late.set_margin_start(10);
+            late.set_margin_end(10);
+            late.set_margin_bottom(8);
+            notice.append(&title);
+            notice.append(&count);
+            notice.append(&late);
+            content.append(&notice);
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(updates::collect_pacman_updates().len());
+            });
+            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+                Ok(waiting) => {
+                    count.set_text(&tf("Currently {} updates are waiting.", &[&waiting]));
+                    ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+            });
+        }
         for action in &queue.actions {
             // The full upgrade's actions are named after their source, not a package.
             let text = match (action.kind, action.name.as_str()) {
@@ -358,8 +406,11 @@ impl QueueController {
 
         dialog.set_extra_child(Some(&scroller));
         dialog.add_response("cancel", t("Cancel"));
-        dialog.add_response("execute", t("Execute"));
+        dialog.add_response("execute", t(if installs_native { "Install and update system" } else { "Execute" }));
         dialog.set_response_appearance("execute", adw::ResponseAppearance::Suggested);
+        // Safe default: Enter or Escape cancels; the system update has to be chosen on purpose.
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
 
         let ctx = self.ctx.clone();
         let log_drawer = self.log_drawer.clone();

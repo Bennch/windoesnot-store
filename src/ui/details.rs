@@ -158,6 +158,14 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     root.append(&sources_heading);
     root.append(&sources_list);
     root.append(&button_row);
+    // Installing a native package always updates the whole system: say so before the click.
+    let system_note = gtk::Label::new(Some(t("Installing this also updates the whole system.")));
+    system_note.add_css_class("warning");
+    system_note.add_css_class("heading");
+    system_note.set_xalign(0.0);
+    system_note.set_wrap(true);
+    system_note.set_visible(false);
+    root.append(&system_note);
     // Shown when this app has an update; says plainly when a system update is needed.
     let update_banner = adw::Banner::new("");
     update_banner.set_revealed(false);
@@ -214,6 +222,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let sources_heading_clone = sources_heading.clone();
     let sources_list_clone = sources_list.clone();
     let chosen_clone = chosen.clone();
+    let system_note_clone = system_note.clone();
     let (tx, rx) = mpsc::channel();
     let (update_tx, update_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -236,7 +245,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 let info = info.unwrap_or_default();
                 spinner_clone.stop();
                 loading_clone.set_visible(false);
-                fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone);
+                fill_sources(&sources_list_clone, &options, &found, summary_source, &chosen_clone, &system_note_clone);
                 // Installed: the button removes, so choosing a source is moot.
                 let pick_source = found.is_empty() && !options.is_empty();
                 sources_heading_clone.set_visible(pick_source);
@@ -435,7 +444,10 @@ fn fill_sources(
     found: &[Installation],
     preselect: PackageSource,
     chosen: &Rc<RefCell<Option<SourceOption>>>,
+    system_note: &gtk::Label,
 ) {
+    // The note matters for a new native install only (not for Flatpak, not once installed).
+    let not_installed = found.is_empty();
     while let Some(row) = list.first_child() {
         list.remove(&row);
     }
@@ -467,9 +479,10 @@ fn fill_sources(
             badge.set_valign(gtk::Align::Center);
             row.add_suffix(&badge);
         }
-        let (chosen_for_radio, option_for_radio) = (chosen.clone(), option.clone());
+        let (chosen_for_radio, option_for_radio, note_for_radio) = (chosen.clone(), option.clone(), system_note.clone());
         radio.connect_toggled(move |radio| {
             if radio.is_active() {
+                note_for_radio.set_visible(not_installed && option_for_radio.source != PackageSource::Flatpak);
                 *chosen_for_radio.borrow_mut() = Some(option_for_radio.clone());
             }
         });
