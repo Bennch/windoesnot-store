@@ -45,5 +45,6 @@ fn main() {
         std::process::exit(2);
     }
     let app = app::AuroraApp::new();
-    app.run(open_desktop);
+    let show_installed = args.len() == 2 && args[1] == "--installed";
+    app.run(open_desktop || show_installed);
 }

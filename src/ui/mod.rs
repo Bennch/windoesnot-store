@@ -868,6 +868,17 @@ pub fn build_ui(app: &adw::Application) {
         ControlFlow::Continue
     });
 
+    // "Installed apps" from the Start orb menu: open straight on that page,
+    // also when Store is already running.
+    let installed_action = gio::SimpleAction::new("show-installed", None);
+    let sidebar_for_installed = sidebar.clone();
+    let window_for_installed = window.clone();
+    installed_action.connect_activate(move |_, _| {
+        sidebar_for_installed.select_row(sidebar_for_installed.row_at_index(2).as_ref());
+        window_for_installed.present();
+    });
+    app.add_action(&installed_action);
+
     // A Start-menu request may arrive while Store is already running. The
     // application action is available after activation in either case.
     let open_action = gio::SimpleAction::new("open-desktop", Some(&String::static_variant_type()));

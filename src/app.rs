@@ -35,11 +35,15 @@ impl AuroraApp {
                 app.activate();
                 app.activate_action("open-desktop", Some(&path.to_string().to_variant()));
                 0
+            } else if args.len() == 2 && args[1] == "--installed" {
+                app.activate();
+                app.activate_action("show-installed", None);
+                0
             } else if args.len() == 1 {
                 app.activate();
                 0
             } else {
-                eprintln!("Usage: windoesnot-store [--open-desktop /path/to/app.desktop]");
+                eprintln!("Usage: windoesnot-store [--open-desktop /path/to/app.desktop | --installed]");
                 2
             }
         });
