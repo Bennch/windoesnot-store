@@ -3,6 +3,15 @@
 use crate::desktop::{language, Language};
 
 const DE: &[(&str, &str)] = &[
+    ("Update waits for matching desktop components", "Update wartet auf passende Desktop-Komponenten"),
+    ("{} {} does not yet match the WinDoesNot window bars. We will publish a matching version soon.", "{} {} passt noch nicht zu den Fensterleisten von WinDoesNot. Wir veröffentlichen bald eine passende Version."),
+    ("{} {} does not yet match the WinDoesNot desktop components. We will publish a matching version soon.", "{} {} passt noch nicht zu den Desktop-Komponenten von WinDoesNot. Wir veröffentlichen bald eine passende Version."),
+    ("Later", "Später"),
+    ("Update anyway", "Trotzdem aktualisieren"),
+    ("Window bars will be unavailable", "Fensterleisten werden vorübergehend fehlen"),
+    ("The window bars will be missing until matching plugins are available and installed again.", "Die Fensterleisten fehlen, bis passende Plugins verfügbar und wieder installiert sind."),
+    ("Matching window bars are available again.", "Passende Fensterleisten sind wieder verfügbar."),
+    ("Install window bars", "Fensterleisten installieren"),
     // Navigation and window
     ("Home", "Start"),
     ("Search", "Suche"),

@@ -18,6 +18,7 @@ type GroupCallback = Rc<RefCell<Option<Rc<dyn Fn(Vec<TransactionAction>)>>>>;
 #[derive(Clone)]
 pub struct UpdatesPage {
     pub root: gtk::Box,
+    plugins_banner: adw::Banner,
     select_all_button: gtk::Button,
     clear_selection_button: gtk::Button,
     apply_button: gtk::Button,
@@ -52,6 +53,11 @@ impl UpdatesPage {
         title.add_css_class("page-title");
         title.set_xalign(0.0);
         root.append(&title);
+
+        let plugins_banner = adw::Banner::new(t("Matching window bars are available again."));
+        plugins_banner.set_button_label(Some(t("Install window bars")));
+        plugins_banner.set_revealed(false);
+        root.append(&plugins_banner);
 
         let info = gtk::Label::new(Some(t(
             "Check and apply updates. System upgrades run through the helper.",
@@ -120,6 +126,7 @@ impl UpdatesPage {
 
         Self {
             root,
+            plugins_banner,
             select_all_button,
             clear_selection_button,
             apply_button,
@@ -212,6 +219,7 @@ impl UpdatesPage {
     }
 
     pub fn refresh(&self, ctx: AppContext, notify: Option<adw::ToastOverlay>) {
+        let banner = self.plugins_banner.clone();
         self.spinner.set_visible(true);
         self.spinner.start();
         self.status.set_text(t("Checking for updates…"));
@@ -237,15 +245,17 @@ impl UpdatesPage {
             if let Err(err) = crate::core::syncdb::refresh_now() {
                 eprintln!("windoesnot-store: update check without fresh database: {err}");
             }
+            let plugins_available = crate::core::desktop_gate::plugin_can_install();
             let (items, error) = collect_updates(&ctx);
             let sorted = classify(&items);
-            let _ = tx.send((items, error, sorted));
+            let _ = tx.send((items, error, sorted, plugins_available));
         });
 
         let notify = notify.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(40), move || match rx.try_recv() {
-            Ok((items, error, sorted)) => {
+            Ok((items, error, sorted, plugins_available)) => {
                 if generation.get() != request { return glib::ControlFlow::Break; }
+                banner.set_revealed(plugins_available);
                 spinner.stop();
                 spinner.set_visible(false);
                 error_label.set_visible(error.is_some());
@@ -296,6 +306,13 @@ impl UpdatesPage {
                 3 => Some(PackageSource::Flatpak),
                 _ => None,
             })
+        });
+    }
+
+    pub fn connect_install_plugins<F: Fn() + 'static>(&self, f: F) {
+        self.plugins_banner.connect_button_clicked(move |banner| {
+            f();
+            banner.set_revealed(false);
         });
     }
 

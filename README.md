@@ -42,12 +42,16 @@ Flathub, and system updates that stay safe for a Hyprland desktop.
 
 ### Hyprland update compatibility
 
-The installed `windoesnot-plugins` package declares a dependency on the exact
-Hyprland upstream version and package release it was built against (CPU-level
-rebuild suffixes are allowed). The Store performs full upgrades through pacman,
-so pacman refuses a newer incompatible Hyprland package while that plugin
-package is installed. This is a package dependency gate, not a separate Store
-switch or an automatic compatibility test of every desktop tool.
+### Update gate
+
+Before a full system upgrade, the Store compares pending Hyprland, gcc-libs,
+qt6-base and qtermwidget versions with the ABI dependencies of the matching
+WinDoesNot packages in the local sync database. If the window bars do not yet
+match, it offers **Later** or **Update anyway**. The latter removes
+`windoesnot-plugins` before the normal full upgrade; window bars can be
+installed again from the Updates page when a matching package is available.
+An incompatible `windoesnot-components` package remains blocked until a
+matching package is published.
 
 Before publishing a Hyprland update for WinDoesNot, rebuild and test the
 plugins against the new image's Hyprland headers, port and verify affected
@@ -114,12 +118,16 @@ sowie Systemupdates, die für einen Hyprland-Desktop sicher bleiben.
 
 ### Kompatibilität bei Hyprland-Updates
 
-Das installierte Paket `windoesnot-plugins` verlangt genau die Hyprland-Version
-und Paketrevision, gegen die es gebaut wurde (CPU-spezifische Neubau-Suffixe
-sind erlaubt). Der Store führt vollständige Updates über pacman aus. Solange
-kein passendes neues Plugin-Paket verfügbar ist, lehnt pacman ein inkompatibles
-Hyprland-Update ab. Das ist eine Paketabhängigkeit, kein eigener Store-Schalter
-und keine automatische Prüfung aller Desktop-Werkzeuge.
+### Update-Sperre
+
+Vor einem vollständigen Systemupdate vergleicht der Store anstehende Versionen
+von Hyprland, gcc-libs, qt6-base und qtermwidget mit den ABI-Abhängigkeiten der
+WinDoesNot-Pakete in der lokalen Sync-Datenbank. Passen die Fensterleisten noch
+nicht, bietet er **Später** oder **Trotzdem aktualisieren** an. Bei letzterem
+entfernt er `windoesnot-plugins` vor dem normalen Systemupdate. Sobald ein
+passendes Paket verfügbar ist, können die Fensterleisten im Updates-Bereich
+wieder installiert werden. Bei inkompatiblen `windoesnot-components` wartet
+das Update weiterhin auf ein passendes Paket.
 
 Vor der Freigabe eines Hyprland-Updates müssen die Plugins mit den Headern der
 neuen Image-Version gebaut und getestet, betroffene Desktop-Werkzeuge angepasst

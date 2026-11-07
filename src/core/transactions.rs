@@ -212,6 +212,10 @@ fn with_privileged_helper(mut command: CommandSpec, helper_path: &str) -> Comman
     command
 }
 
+pub fn plugin_removal_command() -> CommandSpec {
+    CommandSpec::new("pkexec", vec![helper_path(), "remove-incompatible-plugins".into()])
+}
+
 fn helper_path() -> String {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {

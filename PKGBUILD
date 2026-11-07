@@ -3,7 +3,7 @@
 
 pkgname=windoesnot-store
 pkgver=0.3.0
-pkgrel=2
+pkgrel=3
 pkgdesc="App store of the WinDoesNot desktop (GTK4/libadwaita, pacman, AUR, Flatpak)"
 arch=('x86_64')
 url="https://github.com/Bennch/windoesnot-store"

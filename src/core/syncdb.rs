@@ -30,6 +30,12 @@ pub fn query_dbpath() -> PathBuf {
     if has_sync_data(&copy) { copy } else { PathBuf::from(SYSTEM_DB) }
 }
 
+/// Read-only local snapshot for checks that must never trigger a refresh.
+pub fn local_dbpath() -> PathBuf {
+    let copy = dir();
+    if has_sync_data(&copy) { copy } else { PathBuf::from(SYSTEM_DB) }
+}
+
 /// Refreshes the copy now, e.g. for an explicit update check.
 pub fn refresh_now() -> Result<()> {
     refresh(&dir(), Path::new(SYSTEM_DB), true)

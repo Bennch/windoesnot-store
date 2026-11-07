@@ -23,6 +23,12 @@ fn run() -> Result<()> {
     let target = args.remove(0);
     match target.as_str() {
         "pacman" => run_pacman(args),
+        "remove-incompatible-plugins" if args.is_empty() => {
+            let status = Command::new("pacman")
+                .args(["-Rdd", "--noconfirm", "windoesnot-plugins"])
+                .env("LC_ALL", "C").status()?;
+            std::process::exit(status.code().unwrap_or(1));
+        }
         "clear-pacman-lock" => clear_pacman_lock(),
         _ => Err(anyhow!("unsupported target: {target}")),
     }
@@ -428,5 +434,10 @@ mod tests {
     fn normal_remove_and_dependency_marking_still_work() {
         assert!(prepare(&["-Rns", "--noconfirm", "vlc"]).is_ok());
         assert!(prepare(&["-D", "--asdeps", "gtk4"]).is_ok());
+    }
+
+    #[test]
+    fn dependency_bypass_is_not_available_as_a_pacman_operation() {
+        assert!(prepare(&["-Rdd", "--noconfirm", "windoesnot-plugins"]).is_err());
     }
 }

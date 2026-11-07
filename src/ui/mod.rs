@@ -27,7 +27,7 @@ use crate::core::providers::flatpak::Flatpak;
 use crate::core::providers::pacman::Pacman;
 use crate::core::providers::{AurProvider, FlatpakProvider, PacmanProvider};
 use crate::core::runner::{CommandRunner, LogEvent, RunningHandle};
-use crate::core::transactions::{all_upgrade_actions, plan_transactions, TransactionPlan};
+use crate::core::transactions::{all_upgrade_actions, plan_transactions, plugin_removal_command, TransactionPlan};
 use crate::i18n::{t, tf};
 
 pub mod aur_review;
@@ -228,7 +228,7 @@ impl QueueController {
             Ok(plan) => plan,
             Err(err) => { self.toast(&err.to_string()); return; }
         };
-        run_plan(plan, &self.ctx, &self.log_drawer, &self.parent, &self.toasts, &self.finished);
+        start_checked_plan(plan, self.ctx.clone(), self.log_drawer.clone(), self.parent.clone(), self.toasts.clone(), self.finished.clone(), None);
     }
 
     fn show_review_dialog_for(&self, immediate_queue: Option<TransactionQueue>) {
@@ -469,11 +469,8 @@ impl QueueController {
                         return;
                     }
                 };
-                let started = run_plan(plan, &ctx, &log_drawer, &parent, &toasts, &finished);
-                if started && local_queue.is_none() {
-                    ctx.queue.lock().unwrap().clear();
-                    button.set_label(t("Queue (0)"));
-                }
+                start_checked_plan(plan, ctx.clone(), log_drawer.clone(), parent.clone(), toasts.clone(), finished.clone(),
+                    local_queue.is_none().then(|| button.clone()));
             }
             d.close();
         });
@@ -770,6 +767,10 @@ pub fn build_ui(app: &adw::Application) {
         queue_controller.add_upgrade_source(only);
     }));
 
+    updates_page.connect_install_plugins(clone!(@strong queue_controller => move || {
+        queue_controller.add_install("windoesnot-plugins".into(), PackageSource::Repo, None);
+    }));
+
     updates_page.connect_group_update(clone!(@strong queue_controller => move |actions| {
         let whole_system = actions.iter().any(|a| a.source != PackageSource::Flatpak);
         queue_controller.add_upgrade_packages(actions);
@@ -783,6 +784,11 @@ pub fn build_ui(app: &adw::Application) {
     }));
 
     updates_page.bind(ctx.clone());
+    let updates_after_transaction = updates_page.clone();
+    let ctx_after_transaction = ctx.clone();
+    queue_controller.connect_finished(move || {
+        updates_after_transaction.refresh(ctx_after_transaction.clone(), None);
+    });
     let aur_updates = updates_page.clone();
     let aur_context = ctx.clone();
     let aur_search = search_page.clone();
@@ -1135,6 +1141,87 @@ fn completion_text() -> String {
 pub fn apply_installed(pkg: &mut PackageSummary, installed: &crate::core::installation::InstalledApps) {
     pkg.installed_via = installed.find(&pkg.name, None).first().map(|installation| installation.source);
     pkg.installed = pkg.installed_via.is_some();
+}
+
+fn start_checked_plan(
+    plan: TransactionPlan,
+    ctx: AppContext,
+    log_drawer: widgets::log_drawer::LogDrawer,
+    parent: adw::ApplicationWindow,
+    toasts: adw::ToastOverlay,
+    finished: FinishedListeners,
+    clear_button: Option<gtk::Button>,
+) {
+    let parent_dialog = parent.clone();
+    let start = move |plan: TransactionPlan| {
+        if run_plan(plan, &ctx, &log_drawer, &parent, &toasts, &finished) {
+            if let Some(button) = &clear_button {
+                ctx.queue.lock().unwrap().clear();
+                button.set_label(t("Queue (0)"));
+            }
+        }
+    };
+    if !plan.commands.iter().any(|cmd| cmd.args.iter().any(|arg| arg == "-Syu")) {
+        start(plan);
+        return;
+    }
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || { let _ = tx.send(crate::core::desktop_gate::pending_gate()); });
+    let start = Rc::new(start);
+    glib::timeout_add_local(Duration::from_millis(50), move || match rx.try_recv() {
+        Ok(crate::core::desktop_gate::Gate::Ok) => {
+            start(plan.clone());
+            ControlFlow::Break
+        }
+        Ok(crate::core::desktop_gate::Gate::Blocked { package, target_version, reason }) => {
+            let detail = tf("{} {} does not yet match the WinDoesNot window bars. We will publish a matching version soon.",
+                &[&package, &target_version]);
+            let body = if reason == "windoesnot-plugins" { detail } else {
+                tf("{} {} does not yet match the WinDoesNot desktop components. We will publish a matching version soon.",
+                    &[&package, &target_version])
+            };
+            let dialog = adw::MessageDialog::new(Some(&parent_dialog),
+                Some(t("Update waits for matching desktop components")), Some(&body));
+            dialog.add_response("later", t("Later"));
+            if reason == "windoesnot-plugins" {
+                dialog.add_response("force", t("Update anyway"));
+                dialog.set_response_appearance("force", adw::ResponseAppearance::Destructive);
+            }
+            dialog.set_default_response(Some("later"));
+            dialog.set_close_response("later");
+            let parent_warning = parent_dialog.clone();
+            let start_force = start.clone();
+            let force_plan = plan.clone();
+            dialog.connect_response(None, move |d, response| {
+                if response == "force" {
+                    let warning = adw::MessageDialog::new(Some(&parent_warning),
+                        Some(t("Window bars will be unavailable")),
+                        Some(t("The window bars will be missing until matching plugins are available and installed again.")));
+                    warning.add_response("later", t("Later"));
+                    warning.add_response("force", t("Update anyway"));
+                    warning.set_response_appearance("force", adw::ResponseAppearance::Destructive);
+                    warning.set_default_response(Some("later"));
+                    warning.set_close_response("later");
+                    let start_confirmed = start_force.clone();
+                    let plan_confirmed = force_plan.clone();
+                    warning.connect_response(None, move |w, choice| {
+                        if choice == "force" {
+                            let mut plan = plan_confirmed.clone();
+                            plan.commands.insert(0, plugin_removal_command());
+                            start_confirmed(plan);
+                        }
+                        w.close();
+                    });
+                    warning.present();
+                }
+                d.close();
+            });
+            dialog.present();
+            ControlFlow::Break
+        }
+        Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
+    });
 }
 
 fn run_plan(
