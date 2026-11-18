@@ -345,6 +345,21 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                         icon_slot.append(&image);
                     }
                 }
+                if info.icon_path.is_none() {
+                    // Still no logo: try the Flathub app that shares this project page.
+                    let by_home = details.home.clone().or_else(|| info.homepage.clone())
+                        .and_then(|home| crate::core::icons::icon_for_homepage(&home));
+                    if let Some(path) = by_home {
+                        if let Ok(texture) = gtk::gdk::Texture::from_filename(&path) {
+                            let image = gtk::Image::from_paintable(Some(&texture));
+                            image.set_pixel_size(96);
+                            while let Some(child) = icon_slot.first_child() {
+                                icon_slot.remove(&child);
+                            }
+                            icon_slot.append(&image);
+                        }
+                    }
+                }
                 if let Some(title) = &info.title {
                     name_clone.set_text(title);
                 }

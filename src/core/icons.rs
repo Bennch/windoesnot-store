@@ -43,7 +43,74 @@ pub fn icon_file(package: &str, flathub_id: Option<&str>) -> Option<PathBuf> {
     if let Some(path) = names.iter().find_map(|name| arch_index().get(name)) {
         return Some(path.clone());
     }
-    names.iter().find_map(|name| flathub_index().get(&normalize(name)).cloned())
+    if let Some(path) = names.iter().find_map(|name| flathub_index().get(&normalize(name))) {
+        return Some(path.clone());
+    }
+    names.iter().find_map(|name| papirus_index().get(&normalize(name)).cloned())
+}
+
+/// Icon of the Flathub app whose project page is `url` (same host and first path segment).
+pub fn icon_for_homepage(url: &str) -> Option<PathBuf> {
+    homepage_key(url).and_then(|key| homepage_index().get(&key).cloned())
+}
+
+/// `https://github.com/hyprwm/Hyprland/` -> `github.com/hyprwm/hyprland`; plain hosts keep only the host.
+pub fn homepage_key(url: &str) -> Option<String> {
+    let rest = url.split("://").nth(1)?;
+    let rest = rest.split(['?', '#']).next()?.trim_end_matches('/');
+    let mut parts = rest.split('/');
+    let host = parts.next()?.trim_start_matches("www.").to_lowercase();
+    if host.is_empty() { return None; }
+    let forge = ["github.com", "gitlab.com", "codeberg.org", "invent.kde.org", "gitlab.gnome.org", "sr.ht"];
+    if forge.contains(&host.as_str()) {
+        let owner = parts.next()?;
+        let repo = parts.next().unwrap_or("");
+        return Some(format!("{host}/{}/{}", owner.to_lowercase(), repo.trim_end_matches(".git").to_lowercase()));
+    }
+    Some(host)
+}
+
+fn homepage_index() -> &'static HashMap<String, PathBuf> {
+    static INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = HashMap::new();
+        let Ok(xml) = std::fs::read_to_string(Path::new(FLATHUB).join("appstream.xml")) else {
+            return index;
+        };
+        for component in xml.split("<component").skip(1) {
+            let (Some(id), Some(home)) = (between(component, "<id>", "</id>"), between(component, "<url type=\"homepage\">", "</url>")) else {
+                continue;
+            };
+            if let (Some(path), Some(key)) = (flathub_icon_by_id(id), homepage_key(home)) {
+                // A bare host is shared by many projects: only exact repository/project keys are reliable.
+                if key.contains('/') { index.entry(key).or_insert(path); }
+            }
+        }
+        index
+    })
+}
+
+/// Papirus app icons by normalized name (installed with the icon theme; the ISO ships it).
+fn papirus_index() -> &'static HashMap<String, PathBuf> {
+    static INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = HashMap::new();
+        for size in ["64x64", "48x48", "128x128"] {
+            let Ok(files) = std::fs::read_dir(Path::new("/usr/share/icons/Papirus").join(size).join("apps")) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let path = file.path();
+                let is_icon = matches!(path.extension().and_then(|e| e.to_str()), Some("svg" | "png"));
+                // Skip symlinks that point outside the theme directory.
+                if !is_icon || !path.canonicalize().map_or(false, |p| p.starts_with("/usr/share/icons/Papirus")) { continue; }
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    index.entry(normalize(stem)).or_insert(path);
+                }
+            }
+        }
+        index
+    })
 }
 
 /// Builds both indexes off the UI thread so the first tiles do not wait.
@@ -51,6 +118,8 @@ pub fn warm_up() {
     std::thread::spawn(|| {
         arch_index();
         flathub_index();
+        papirus_index();
+        homepage_index();
     });
 }
 
@@ -123,6 +192,14 @@ fn between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn homepage_keys() {
+        assert_eq!(homepage_key("https://github.com/hyprwm/Hyprland/").as_deref(), Some("github.com/hyprwm/hyprland"));
+        assert_eq!(homepage_key("https://github.com/o/r.git").as_deref(), Some("github.com/o/r"));
+        assert_eq!(homepage_key("https://www.example.org/path?x=1").as_deref(), Some("example.org"));
+        assert_eq!(homepage_key("not a url"), None);
+    }
 
     #[test]
     fn aur_suffixes_are_stripped_in_order() {

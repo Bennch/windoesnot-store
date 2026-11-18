@@ -2251,6 +2251,14 @@ fn themed_css(theme: ThemeMode) -> String {
             font-size: 26px;
             font-weight: 800;
         }
+        .letter-icon-0 { background-color: alpha(#fe6f2d, 0.18); color: #fe6f2d; }
+        .letter-icon-1 { background-color: alpha(#3b82f6, 0.18); color: #3b82f6; }
+        .letter-icon-2 { background-color: alpha(#10b981, 0.18); color: #10b981; }
+        .letter-icon-3 { background-color: alpha(#a855f7, 0.18); color: #a855f7; }
+        .letter-icon-4 { background-color: alpha(#ec4899, 0.18); color: #ec4899; }
+        .letter-icon-5 { background-color: alpha(#eab308, 0.18); color: #eab308; }
+        .letter-icon-6 { background-color: alpha(#06b6d4, 0.18); color: #06b6d4; }
+        .letter-icon-7 { background-color: alpha(#ef4444, 0.18); color: #ef4444; }
     "#.to_string();
 
     let replacements = [
