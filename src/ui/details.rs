@@ -77,6 +77,21 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     action_btn.add_css_class("suggested-action");
     // Enabled once the installed state is known, so nothing is installed twice.
     action_btn.set_sensitive(false);
+    // Starts the installed app; shown once the installation and its launcher are known.
+    let open_app_btn = gtk::Button::with_label(t("Open"));
+    open_app_btn.add_css_class("suggested-action");
+    open_app_btn.set_visible(false);
+    let launcher: Rc<RefCell<Option<crate::core::launch::Launcher>>> = Rc::new(RefCell::new(None));
+    {
+        let launcher = launcher.clone();
+        open_app_btn.connect_clicked(move |button| {
+            if let Some(target) = launcher.borrow().as_ref() {
+                if crate::core::launch::launch(target).is_err() {
+                    button.set_tooltip_text(Some(t("Could not start the app")));
+                }
+            }
+        });
+    }
     let open_home_btn = gtk::Button::with_label(t("Open Homepage"));
     open_home_btn.set_visible(false);
     let logs_btn = gtk::Button::with_label(t("View Logs"));
@@ -84,6 +99,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     update_btn.add_css_class("suggested-action");
     update_btn.set_visible(false);
     let pending_update: Rc<RefCell<Option<TransactionAction>>> = Rc::new(RefCell::new(None));
+    button_row.append(&open_app_btn);
     button_row.append(&action_btn);
     button_row.append(&update_btn);
     button_row.append(&open_home_btn);
@@ -263,6 +279,8 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let loading_clone = loading.clone();
     let spinner_clone = spinner.clone();
     let open_home_btn_clone = open_home_btn.clone();
+    let open_app_for_load = open_app_btn.clone();
+    let launcher_for_load = launcher.clone();
     let homepage_clone = homepage.clone();
     let installations_clone = installations.clone();
     let installations_clone_for_status = installations.clone();
@@ -317,6 +335,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     None => t("Install").to_string(),
                 });
                 action_btn_clone.set_sensitive(true);
+                update_open_button(&open_app_for_load, &launcher_for_load, preferred(&found, summary_source));
                 if !found.is_empty() {
                     update_loading_for_details.set_visible(true);
                     update_spinner_for_details.start();
@@ -446,6 +465,8 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let name_for_refresh = summary.name.clone();
     let installations_for_refresh = installations.clone();
     let action_for_refresh = action_btn.clone();
+    let open_app_for_refresh = open_app_btn.clone();
+    let launcher_for_refresh = launcher.clone();
     let installed_for_refresh = installed.clone();
     let sources_heading_for_refresh = sources_heading.clone();
     let sources_list_for_refresh = sources_list.clone();
@@ -469,6 +490,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         });
         let installations = installations_for_refresh.clone();
         let action = action_for_refresh.clone();
+        let (open_app, launcher_cell) = (open_app_for_refresh.clone(), launcher_for_refresh.clone());
         let installed = installed_for_refresh.clone();
         let sources_heading = sources_heading_for_refresh.clone();
         let sources_list = sources_list_for_refresh.clone();
@@ -484,6 +506,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
             Ok((found, pending)) => {
                 if page.upgrade().is_some() {
                     installed.set_subtitle(&markup_escape(&installed_value(&found)));
+                    update_open_button(&open_app, &launcher_cell, preferred(&found, summary_source));
                     action.set_label(&match preferred(&found, summary_source) {
                         Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                         None => t("Install").to_string(),
@@ -752,4 +775,30 @@ fn installed_value(found: &[Installation]) -> String {
         .map(|installation| format!("{} {} {}", installation.source.label(), installation.name, installation.version).trim_end().to_string())
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+
+/// Shows "Open" when the preferred installation has a launcher (looked up off the UI thread).
+fn update_open_button(
+    button: &gtk::Button,
+    launcher: &Rc<RefCell<Option<crate::core::launch::Launcher>>>,
+    installation: Option<&Installation>,
+) {
+    *launcher.borrow_mut() = None;
+    button.set_visible(false);
+    let Some(installation) = installation.cloned() else { return };
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::core::launch::find_launcher(&installation));
+    });
+    let (button, launcher) = (button.clone(), launcher.clone());
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || match rx.try_recv() {
+        Ok(found) => {
+            button.set_visible(found.is_some());
+            *launcher.borrow_mut() = found;
+            glib::ControlFlow::Break
+        }
+        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+    });
 }

@@ -6,6 +6,7 @@ pub mod downgrade;
 pub mod cache;
 pub mod icons;
 pub mod installation;
+pub mod launch;
 pub mod models;
 pub mod news;
 pub mod pending;

@@ -87,27 +87,27 @@ impl LogDrawer {
 
         let progress_panel = gtk::Box::new(gtk::Orientation::Vertical, 10);
         progress_panel.add_css_class("transaction-progress-panel");
-        progress_panel.set_margin_start(16);
-        progress_panel.set_margin_end(16);
-        progress_panel.set_margin_top(12);
-        progress_panel.set_margin_bottom(14);
-        let progress_line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        progress_panel.set_margin_start(0);
+        progress_panel.set_margin_end(0);
+        progress_panel.set_margin_top(0);
+        progress_panel.set_margin_bottom(0);
         let progress_status = gtk::Label::new(Some(t("Working…")));
         progress_status.add_css_class("transaction-progress-status");
         progress_status.set_wrap(true);
-        progress_status.set_lines(2);
+        progress_status.set_lines(1);
+        progress_status.set_ellipsize(gtk::pango::EllipsizeMode::End);
         progress_status.set_xalign(0.0);
         progress_status.set_hexpand(true);
-        let progress_value = gtk::Label::new(Some("…"));
+        let progress_value = gtk::Label::new(Some(""));
         progress_value.add_css_class("transaction-progress-value");
         progress_value.set_valign(gtk::Align::Start);
-        progress_line.append(&progress_status);
-        progress_line.append(&progress_value);
+        // One compact row: status and percentage on the left, buttons on the right; the bar is a thin line below.
+        header.prepend(&progress_value);
+        header.prepend(&progress_status);
         let progress = gtk::ProgressBar::new();
         progress.add_css_class("transaction-progress");
         progress.set_hexpand(true);
         progress.set_show_text(false);
-        progress_panel.append(&progress_line);
         progress_panel.append(&progress);
         let log_revealer = gtk::Revealer::new();
         log_revealer.set_reveal_child(false);
@@ -395,7 +395,7 @@ impl LogDrawer {
         self.progress_determinate.set(false);
         self.progress.set_fraction(0.0);
         self.progress_status.set_text(t("Working…"));
-        self.progress_value.set_text("…");
+        self.progress_value.set_text("");
     }
 
     pub fn observe_line(&self, line: &str) {
@@ -405,6 +405,15 @@ impl LogDrawer {
             self.progress.set_fraction(done as f64 / total as f64);
             self.progress_value.set_text(&format!("{}%", (done as f64 / total as f64 * 100.0).round() as u32));
         }
+    }
+
+    /// Drawer shown for a refusal (nothing was started): no "working" state, just the reason.
+    pub fn show_notice(&self, text: &str) {
+        self.progress_running.set(false);
+        self.progress_determinate.set(true);
+        self.progress.set_fraction(0.0);
+        self.progress_value.set_text("");
+        self.progress_status.set_text(text);
     }
 
     pub fn finish_transaction(&self, success: bool) {

@@ -1284,6 +1284,7 @@ fn run_plan(
             *ctx.transaction_in_progress.lock().unwrap() = false;
             toasts.add_toast(adw::Toast::new(t("Failed to check package manager status")));
             log_drawer.set_visible(true);
+            log_drawer.show_notice(t("Failed to check package manager status"));
             log_drawer.append_line(
                 &tf("Failed to check active package managers: {}", &[&err]),
                 ctx.runner.log_limit,
@@ -1298,6 +1299,7 @@ fn run_plan(
             "Another package manager process is already running",
         ));
         log_drawer.set_visible(true);
+        log_drawer.show_notice(t("Another package manager process is already running"));
         log_drawer.append_line(
             &tf(
                 "Refusing to start: active package manager process detected: {}",
@@ -1312,6 +1314,7 @@ fn run_plan(
         *ctx.transaction_in_progress.lock().unwrap() = false;
         toasts.add_toast(adw::Toast::new(t("Pacman lock file present")));
         log_drawer.set_visible(true);
+        log_drawer.show_notice(t("Pacman lock file present"));
         log_drawer.append_line(
             "Refusing to start because /var/lib/pacman/db.lck exists. Use the Clear Lock button in Logs.",
             ctx.runner.log_limit,
@@ -2153,7 +2156,7 @@ fn themed_css(theme: ThemeMode) -> String {
         }
         .log-drawer-header {
             background-color: $SIDEBAR_FROM$;
-            border-bottom: 1px solid $DIVIDER$;
+            padding: 6px 4px;
         }
         .log-drawer-scroller,
         .log-drawer-scroller > viewport,
@@ -2168,8 +2171,9 @@ fn themed_css(theme: ThemeMode) -> String {
             color: $TEXT$;
         }
         .transaction-progress-status {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
+            margin-left: 8px;
         }
         .transaction-progress-value {
             color: @accent_color;
@@ -2177,13 +2181,13 @@ fn themed_css(theme: ThemeMode) -> String {
             font-weight: 800;
         }
         progressbar.transaction-progress > trough {
-            min-height: 16px;
-            border-radius: 8px;
+            min-height: 4px;
+            border-radius: 0;
             background-color: $DIVIDER$;
         }
         progressbar.transaction-progress > trough > progress {
-            min-height: 16px;
-            border-radius: 8px;
+            min-height: 4px;
+            border-radius: 0;
             background-color: @accent_bg_color;
         }
         .log-resize-handle {

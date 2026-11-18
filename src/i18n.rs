@@ -102,6 +102,8 @@ const DE: &[(&str, &str)] = &[
     ("Remove ({})", "Entfernen ({})"),
     ("Installed: yes – {}", "Installiert: ja – {}"),
     ("Details", "Details"),
+    ("Open", "Öffnen"),
+    ("Could not start the app", "Die App konnte nicht gestartet werden"),
     ("Popular with Arch users", "Beliebt bei Arch-Nutzern"),
     ("Discover more", "Mehr entdecken"),
     ("Loading more apps…", "Weitere Apps werden geladen …"),
