@@ -104,6 +104,59 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         row
     };
     let version = info_row(t("Version"), false);
+    // Installed repository packages: older cached versions can be chosen right here.
+    if summary.source == PackageSource::Repo {
+        if let Some(current) = crate::core::downgrade::installed_version(&summary.name) {
+            let candidates = crate::core::downgrade::older_candidates(
+                &summary.name,
+                &current,
+                &crate::core::downgrade::read_cache(std::path::Path::new(crate::core::downgrade::CACHE_DIR)),
+            );
+            if !candidates.is_empty() {
+                let mut labels = vec![tf("Installed: {}", &[&current])];
+                labels.extend(candidates.iter().map(|c| c.version.clone()));
+                let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+                let dropdown = gtk::DropDown::from_strings(&refs);
+                dropdown.set_valign(gtk::Align::Center);
+                let apply = gtk::Button::with_label(t("Install this version"));
+                apply.add_css_class("destructive-action");
+                apply.set_valign(gtk::Align::Center);
+                apply.set_sensitive(false);
+                {
+                    let apply = apply.clone();
+                    dropdown.connect_selected_notify(move |d| apply.set_sensitive(d.selected() > 0));
+                }
+                let parent_dialog = handles.queue.parent_window();
+                let queue = handles.queue.clone();
+                let name = summary.name.clone();
+                let dropdown_for_click = dropdown.clone();
+                apply.connect_clicked(move |_| {
+                    let index = dropdown_for_click.selected() as usize;
+                    if index == 0 { return; }
+                    let Some(candidate) = candidates.get(index - 1).cloned() else { return };
+                    let dialog = adw::MessageDialog::new(
+                        Some(&parent_dialog),
+                        Some(&tf("Restore an older version of {}", &[&name])),
+                        Some(&tf(
+                            "Install version {}? The package manager checks dependencies; if other packages need the newer version, nothing is changed.",
+                            &[&candidate.version],
+                        )),
+                    );
+                    dialog.add_response("cancel", t("Cancel"));
+                    dialog.add_response("restore", t("Install this version"));
+                    dialog.set_response_appearance("restore", adw::ResponseAppearance::Destructive);
+                    let queue = queue.clone();
+                    dialog.connect_response(None, move |d: &adw::MessageDialog, response| {
+                        if response == "restore" { queue.run_downgrade(&candidate.path); }
+                        d.close();
+                    });
+                    dialog.present();
+                });
+                version.add_suffix(&dropdown);
+                version.add_suffix(&apply);
+            }
+        }
+    }
     let installed = info_row(t("Installed"), false);
     let size = info_row(t("Size"), false);
     let homepage = info_row(t("Website"), false);
