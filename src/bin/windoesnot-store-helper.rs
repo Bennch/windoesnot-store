@@ -49,7 +49,31 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
         args.remove(0);
     }
 
-    let args = prepare_pacman_args(args)?;
+    let mut args = prepare_pacman_args(args)?;
+    if args.first().map(String::as_str) == Some("-Syu") {
+        // Preview the same freshly synchronized databases that the upgrade uses.
+        let refresh = Command::new("pacman").args(["-Sy"]).env("LC_ALL", "C").status()?;
+        if !refresh.success() { std::process::exit(refresh.code().unwrap_or(1)); }
+        let output = Command::new("/usr/bin/windoesnot-update-plan").env("LC_ALL", "C").output();
+        if let Ok(output) = output {
+            if output.status.success() {
+                if let Ok(plan) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+                    if plan["status"] == "fixed" {
+                        if let Some(targets) = plan["targets"].as_array() {
+                            let repos = configured_repos()?;
+                            let selected: Vec<String> = targets.iter().map(|target| target.as_str().unwrap_or("").to_string()).collect();
+                            if selected.iter().all(|target| is_safe_repo_pkg(target, &repos)) {
+                                println!("Explicit repository packages: {}", selected.join(", "));
+                                args.extend(selected);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // On an unresolved or unavailable plan, pacman emits its normal error.
+        args[0] = "-Su".to_string();
+    }
 
     let status = Command::new("pacman")
         .args(&args)
@@ -206,7 +230,7 @@ fn validate_pacman(raw_args: &[String]) -> Result<()> {
                 }
                 pkg_files.push(arg);
             } else {
-                if !is_safe_pkg(arg) {
+                if !is_safe_pkg(arg) && !(op == "-Syu" && is_safe_repo_pkg(arg, &configured_repos()?)) {
                     return Err(anyhow!("invalid package name: {arg}"));
                 }
                 pkgs.push(arg);
@@ -331,6 +355,27 @@ fn validate_flag_value(flag: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+fn configured_repos() -> Result<Vec<String>> {
+    let output = Command::new("pacman-conf").arg("--repo-list").env("LC_ALL", "C").output()?;
+    if !output.status.success() { return Err(anyhow!("cannot read configured repositories")); }
+    Ok(String::from_utf8(output.stdout)?.lines().map(str::to_string).collect())
+}
+
+fn is_safe_component(part: &str) -> bool {
+    let mut chars = part.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphanumeric() || "@._+".contains(c) => {}
+        _ => return false,
+    }
+    part.len() <= 128 && chars.all(|c| c.is_ascii_alphanumeric() || "@._+-".contains(c))
+}
+
+/// `repo/pkg` with both parts restricted to the pacman name alphabet and the repo configured in pacman.conf.
+fn is_safe_repo_pkg(target: &str, repos: &[String]) -> bool {
+    let Some((repo, pkg)) = target.split_once('/') else { return false; };
+    is_safe_component(repo) && is_safe_component(pkg) && repos.iter().any(|r| r == repo)
+}
+
 fn is_safe_pkg(name: &str) -> bool {
     if name.is_empty() || name.len() > 128 {
         return false;
@@ -387,6 +432,15 @@ mod tests {
     fn full_upgrade_accepts_package_targets() {
         assert!(prepare(&["-Syu", "--needed", "--noconfirm", "firefox", "vlc"]).is_ok());
         assert!(prepare(&["-Syu", "--noconfirm"]).is_ok());
+    }
+
+    #[test]
+    fn repository_targets_are_strict_and_configured() {
+        let repos = vec!["core".to_string(), "cachyos-v3".to_string()];
+        assert!(is_safe_repo_pkg("core/firefox", &repos));
+        for target in ["unknown/firefox", "core/-x", "core/firefox/extra", "core/--nodeps", "core/firefox;id", "/firefox", "core/"] {
+            assert!(!is_safe_repo_pkg(target, &repos), "accepted {target}");
+        }
     }
 
     #[test]
