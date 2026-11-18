@@ -161,6 +161,12 @@ pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Op
             }
         },
         PackageSource::Aur => match action.kind {
+            ActionKind::Install if isolated_build_available(settings) => {
+                let mut spec = CommandSpec::new("windoesnot-aur-isolated-install", vec![action.name.clone()]);
+                spec.args.extend(noconfirm.clone());
+                spec.env.push(("WINDOESNOT_STORE_HELPER".to_string(), helper.clone()));
+                Some(spec)
+            }
             ActionKind::Install => Some(aur_command(settings.aur_helper, "-Syu", Some(&action.name), &noconfirm, &helper)),
             ActionKind::Remove => Some(aur_command(settings.aur_helper, "-Rns", Some(&action.name), &noconfirm, &helper)),
             ActionKind::Upgrade => Some(aur_command(settings.aur_helper, "-Syu", None, &noconfirm, &helper)),
@@ -189,6 +195,14 @@ pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Op
             }
         },
     }
+}
+
+/// AUR installs run in a throw-away container when the setting is on and every tool is present.
+pub fn isolated_build_available(settings: &Settings) -> bool {
+    settings.aur_isolated
+        && ["systemd-nspawn", "pacstrap", "git", "pkexec", "windoesnot-aur-isolated-install", "windoesnot-isolated-build"]
+            .iter()
+            .all(|tool| crate::core::cache::command_exists(tool))
 }
 
 fn aur_command(helper: AurHelperKind, op: &str, pkg: Option<&str>, noconfirm: &[String], helper_path: &str) -> CommandSpec {
@@ -396,5 +410,16 @@ mod tests {
         assert_eq!(AurHelperKind::Paru.resolve_with(|_| true), Some(AurHelperKind::Paru));
         assert_eq!(AurHelperKind::Yay.resolve_with(|_| true), Some(AurHelperKind::Yay));
         assert_eq!(AurHelperKind::Yay.resolve_with(|_| false), None);
+    }
+
+    #[test]
+    fn aur_install_uses_isolated_wrapper_only_when_available() {
+        let mut settings = Settings::default();
+        settings.aur_isolated = false;
+        let action = TransactionAction { name: "foo-bin".into(), source: PackageSource::Aur, kind: ActionKind::Install, origin: None };
+        let plain = command_for_action(&action, &settings).unwrap();
+        assert_ne!(plain.program, "windoesnot-aur-isolated-install");
+        // With the setting off the isolation never applies, whatever is installed.
+        assert!(!isolated_build_available(&settings));
     }
 }

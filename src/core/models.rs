@@ -268,6 +268,8 @@ pub struct Settings {
     pub terminal_mode: TerminalMode,
     pub terminal_emulator: TerminalEmulator,
     pub aur_enabled: bool,
+    /// Build AUR packages in a throw-away container when the isolation tools are installed.
+    pub aur_isolated: bool,
 }
 
 impl Settings {
@@ -286,6 +288,7 @@ impl Default for Settings {
             terminal_mode: TerminalMode::Integrated,
             terminal_emulator: TerminalEmulator::Auto,
             aur_enabled: false,
+            aur_isolated: true,
         }
     }
 }

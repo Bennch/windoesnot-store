@@ -102,6 +102,8 @@ const DE: &[(&str, &str)] = &[
     ("Remove ({})", "Entfernen ({})"),
     ("Installed: yes – {}", "Installiert: ja – {}"),
     ("Details", "Details"),
+    ("Build AUR packages in isolation", "AUR-Pakete isoliert bauen"),
+    ("Builds run in a throw-away container without access to your files. Needs systemd-nspawn and arch-install-scripts.", "Gebaut wird in einem Wegwerf-Container ohne Zugriff auf deine Dateien. Benötigt systemd-nspawn und arch-install-scripts."),
     ("Open", "Öffnen"),
     ("Could not start the app", "Die App konnte nicht gestartet werden"),
     ("Popular with Arch users", "Beliebt bei Arch-Nutzern"),

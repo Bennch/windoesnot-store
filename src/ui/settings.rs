@@ -16,6 +16,7 @@ pub struct SettingsPage {
     aur_switch: adw::SwitchRow,
     helper_row: adw::ComboRow,
     noconfirm_row: adw::SwitchRow,
+    isolated_row: adw::SwitchRow,
     immediate_actions_row: adw::SwitchRow,
     clear_cache: gtk::Button,
     about_btn: gtk::Button,
@@ -73,6 +74,10 @@ impl SettingsPage {
         helper_row.set_title(t("AUR Helper"));
         helper_row.set_model(Some(&list));
 
+        let isolated_row = adw::SwitchRow::new();
+        isolated_row.set_title(t("Build AUR packages in isolation"));
+        isolated_row.set_subtitle(t("Builds run in a throw-away container without access to your files. Needs systemd-nspawn and arch-install-scripts."));
+
         let noconfirm_row = adw::SwitchRow::new();
         noconfirm_row.set_title(t("Allow --noconfirm"));
         noconfirm_row.set_subtitle(t("Applies to external terminal mode. Integrated logs are always non-interactive."));
@@ -100,6 +105,7 @@ impl SettingsPage {
 
         group.add(&aur_switch);
         group.add(&helper_row);
+        group.add(&isolated_row);
         group.add(&noconfirm_row);
         group.add(&immediate_actions_row);
         cache_group.add(&cache_row);
@@ -117,6 +123,7 @@ impl SettingsPage {
             aur_switch,
             helper_row,
             noconfirm_row,
+            isolated_row,
             immediate_actions_row,
             clear_cache,
             about_btn,
@@ -142,6 +149,7 @@ impl SettingsPage {
         if settings.aur_helper.installed().is_none() {
             self.helper_row.set_subtitle(t("No AUR helper installed. Install paru or yay to use AUR."));
         }
+        self.isolated_row.set_active(settings.aur_isolated);
         self.noconfirm_row.set_active(settings.allow_noconfirm);
         self.immediate_actions_row.set_active(settings.immediate_actions);
 
@@ -230,6 +238,13 @@ impl SettingsPage {
         });
 
         let ctx_clone = ctx.clone();
+        let ctx_isolated = ctx.clone();
+        self.isolated_row.connect_active_notify(move |row| {
+            let mut settings = ctx_isolated.settings.lock().unwrap();
+            settings.aur_isolated = row.is_active();
+            let _ = save_settings(&settings);
+        });
+
         self.noconfirm_row.connect_active_notify(move |row| {
             let mut settings = ctx_clone.settings.lock().unwrap();
             settings.allow_noconfirm = row.is_active();

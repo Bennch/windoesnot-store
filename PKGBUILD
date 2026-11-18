@@ -3,13 +3,14 @@
 
 pkgname=windoesnot-store
 pkgver=0.3.0
-pkgrel=5
+pkgrel=6
 pkgdesc="App store of the WinDoesNot desktop (GTK4/libadwaita, pacman, AUR, Flatpak)"
 arch=('x86_64')
 url="https://github.com/Bennch/windoesnot-store"
 license=('MIT')
 depends=('gtk4' 'libadwaita' 'polkit' 'pacman' 'appstream' 'fakeroot')
-optdepends=('archlinux-appstream-data: icons for repository apps that are not installed'
+optdepends=('arch-install-scripts: build AUR packages in an isolated container (with systemd-nspawn)'
+            'archlinux-appstream-data: icons for repository apps that are not installed'
             'flatpak: Flathub apps'
             'paru: AUR packages'
             'yay: AUR packages')
