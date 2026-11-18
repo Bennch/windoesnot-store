@@ -72,6 +72,8 @@ where
     text.set_hexpand(true);
     text.set_valign(gtk::Align::Center);
 
+    let shown = crate::core::icons::display_name(package, flathub_id, title);
+    let title = shown.as_str();
     let name = gtk::Label::new(Some(title));
     name.add_css_class("title-4");
     name.set_xalign(0.0);

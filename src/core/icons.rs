@@ -113,6 +113,79 @@ fn papirus_index() -> &'static HashMap<String, PathBuf> {
     })
 }
 
+/// One display name for every list: the catalogue name when the app is known (Arch or Flathub AppStream),
+/// else the readable last segment of an application id (`com.google.Chrome` -> `Chrome`), else `fallback`.
+pub fn display_name(package: &str, flathub_id: Option<&str>, fallback: &str) -> String {
+    if let Some(id) = flathub_id {
+        if let Some(name) = flathub_names().get(id) {
+            return name.clone();
+        }
+    }
+    if let Some(name) = base_names(package).iter().find_map(|n| arch_names().get(n)) {
+        return name.clone();
+    }
+    let candidate = flathub_id.unwrap_or(fallback);
+    if looks_like_app_id(candidate) {
+        return readable_id(candidate);
+    }
+    fallback.to_string()
+}
+
+fn looks_like_app_id(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('.').collect();
+    parts.len() >= 3 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-'))
+}
+
+fn readable_id(id: &str) -> String {
+    let last = id.rsplit('.').next().unwrap_or(id);
+    let mut chars = last.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => id.to_string(),
+    }
+}
+
+fn flathub_names() -> &'static HashMap<String, String> {
+    static NAMES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names = HashMap::new();
+        let Ok(xml) = std::fs::read_to_string(Path::new(FLATHUB).join("appstream.xml")) else {
+            return names;
+        };
+        for component in xml.split("<component").skip(1) {
+            if let (Some(id), Some(name)) = (between(component, "<id>", "</id>"), between(component, "<name>", "</name>")) {
+                names.entry(id.to_string()).or_insert_with(|| xml_unescape(name));
+            }
+        }
+        names
+    })
+}
+
+/// Package name -> name from the Arch AppStream catalogue (`<pkgname>` + untranslated `<name>`).
+fn arch_names() -> &'static HashMap<String, String> {
+    static NAMES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        use std::io::Read;
+        let mut names = HashMap::new();
+        for file in ["core", "extra", "multilib"] {
+            let path = Path::new("/usr/share/swcatalog/xml").join(format!("{file}.xml.gz"));
+            let Ok(handle) = std::fs::File::open(&path) else { continue };
+            let mut xml = String::new();
+            if flate2::read::GzDecoder::new(handle).read_to_string(&mut xml).is_err() { continue; }
+            for component in xml.split("<component").skip(1) {
+                if let (Some(pkg), Some(name)) = (between(component, "<pkgname>", "</pkgname>"), between(component, "<name>", "</name>")) {
+                    names.entry(pkg.to_string()).or_insert_with(|| xml_unescape(name));
+                }
+            }
+        }
+        names
+    })
+}
+
+fn xml_unescape(text: &str) -> String {
+    text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'")
+}
+
 /// Builds both indexes off the UI thread so the first tiles do not wait.
 pub fn warm_up() {
     std::thread::spawn(|| {
@@ -120,6 +193,8 @@ pub fn warm_up() {
         flathub_index();
         papirus_index();
         homepage_index();
+        flathub_names();
+        arch_names();
     });
 }
 
@@ -192,6 +267,16 @@ fn between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readable_names() {
+        assert_eq!(readable_id("com.google.Chrome"), "Chrome");
+        assert_eq!(readable_id("com.github.sdv43.whaler"), "Whaler");
+        assert!(looks_like_app_id("com.github.sdv43.whaler"));
+        assert!(!looks_like_app_id("betterbird-bin"));
+        assert!(!looks_like_app_id("python-3.11"));
+        assert_eq!(xml_unescape("A &amp; B"), "A & B");
+    }
 
     #[test]
     fn homepage_keys() {

@@ -46,7 +46,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     icon.set_valign(gtk::Align::Start);
 
     let text_col = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    let name = gtk::Label::new(Some(&summary.name));
+    let name = gtk::Label::new(Some(&crate::core::icons::display_name(&summary.name, flathub_id, &summary.name)));
     name.add_css_class("title-1");
     name.set_xalign(0.0);
 

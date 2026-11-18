@@ -486,7 +486,8 @@ fn render_updates(
         let name_col = gtk::Box::new(gtk::Orientation::Vertical, 2);
         name_col.set_hexpand(true);
 
-        let name = gtk::Label::new(Some(&action.name));
+        let flathub_id = (action.source == PackageSource::Flatpak).then_some(action.name.as_str());
+        let name = gtk::Label::new(Some(&crate::core::icons::display_name(&action.name, flathub_id, &action.name)));
         name.set_xalign(0.0);
         name.add_css_class("title-5");
 

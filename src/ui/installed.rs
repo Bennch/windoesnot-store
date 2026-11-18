@@ -243,7 +243,8 @@ fn build_row(pkg: PackageSummary, handles: &UiHandles, ctx: &AppContext) -> gtk:
     let icon = app_icon(&pkg.name, (pkg.source == PackageSource::Flatpak).then_some(pkg.name.as_str()), 32);
     icon.set_valign(gtk::Align::Center);
     name_col.append(&icon);
-    let name = gtk::Label::new(Some(&pkg.name));
+    let flathub_id = (pkg.source == PackageSource::Flatpak).then_some(pkg.name.as_str());
+    let name = gtk::Label::new(Some(&crate::core::icons::display_name(&pkg.name, flathub_id, &pkg.name)));
     name.add_css_class("title-4");
     name.set_xalign(0.0);
     name_col.append(&name);
