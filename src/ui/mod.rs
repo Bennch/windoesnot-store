@@ -789,6 +789,15 @@ pub fn build_ui(app: &adw::Application) {
         queue_controller.add_install("windoesnot-plugins".into(), PackageSource::Repo, None);
     }));
 
+    {
+        let ctx_for_details = ctx.clone();
+        let handles_for_details = handles.clone();
+        updates_page.connect_open_details(move |summary| {
+            let flatpak_id = (summary.source == PackageSource::Flatpak).then(|| summary.name.clone());
+            details::show_details(&ctx_for_details, &handles_for_details, summary, flatpak_id);
+        });
+    }
+
     updates_page.connect_group_update(clone!(@strong queue_controller => move |actions| {
         let whole_system = actions.iter().any(|a| a.source != PackageSource::Flatpak);
         queue_controller.add_upgrade_packages(actions);

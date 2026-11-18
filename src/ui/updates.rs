@@ -13,6 +13,13 @@ use crate::ui::AppContext;
 use crate::i18n::{t, tf};
 
 /// Queues the actions behind a group header's button.
+type DetailsCallback = Rc<dyn Fn(crate::core::models::PackageSummary)>;
+
+thread_local! {
+    // Set once by the main window; read when rows are rendered (single GTK thread).
+    static OPEN_DETAILS: RefCell<Option<DetailsCallback>> = RefCell::new(None);
+}
+
 type GroupCallback = Rc<RefCell<Option<Rc<dyn Fn(Vec<TransactionAction>)>>>>;
 
 #[derive(Clone)]
@@ -321,6 +328,11 @@ impl UpdatesPage {
         *self.group_callback.borrow_mut() = Some(Rc::new(f));
     }
 
+    /// Called when the name of an update row is clicked.
+    pub fn connect_open_details<F: Fn(crate::core::models::PackageSummary) + 'static>(&self, f: F) {
+        OPEN_DETAILS.with(|cell| *cell.borrow_mut() = Some(Rc::new(f)));
+    }
+
     pub fn connect_apply_selected<F: Fn(Vec<TransactionAction>) + 'static>(&self, f: F) {
         let rows = self.rows.clone();
         self.apply_selected_button.connect_clicked(move |_| {
@@ -502,6 +514,25 @@ fn render_updates(
 
         name_col.append(&name);
         name_col.append(&detail);
+        {
+            let summary = crate::core::models::PackageSummary {
+                name: action.name.clone(),
+                summary: String::new(),
+                version: String::new(),
+                source: action.source,
+                installed: true,
+                origin: action.origin.clone(),
+                installed_via: Some(action.source),
+            };
+            let click = gtk::GestureClick::new();
+            click.connect_released(move |gesture, _, _, _| {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                let callback = OPEN_DETAILS.with(|cell| cell.borrow().clone());
+                if let Some(callback) = callback { callback(summary.clone()); }
+            });
+            name_col.add_controller(click);
+            name_col.set_cursor_from_name(Some("pointer"));
+        }
 
         let row_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row_box.add_css_class("update-row-inner");

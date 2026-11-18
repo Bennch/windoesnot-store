@@ -108,7 +108,6 @@ const DE: &[(&str, &str)] = &[
     ("Restore an older version of {}", "Ältere Version von {} wiederherstellen"),
     ("Installed: {}. The package manager checks dependencies; if other packages need the newer version, nothing is changed. The package stays eligible for later updates.", "Installiert: {}. Die Paketverwaltung prüft die Abhängigkeiten; brauchen andere Pakete die neuere Version, wird nichts geändert. Das Paket bleibt für spätere Updates freigegeben."),
     ("Install this version", "Diese Version installieren"),
-    ("Installed: {}", "Installiert: {}"),
     ("Install version {}? The package manager checks dependencies; if other packages need the newer version, nothing is changed.", "Version {} installieren? Die Paketverwaltung prüft die Abhängigkeiten; brauchen andere Pakete die neuere Version, wird nichts geändert."),
     ("Remove", "Entfernen"),
     ("This app is not managed by Store.", "Diese App wird nicht vom Store verwaltet."),
