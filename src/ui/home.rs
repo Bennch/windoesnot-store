@@ -385,6 +385,61 @@ impl HomePage {
         });
     }
 
+    /// Fills a category page: curated apps first, then the Flathub categories page by page while scrolling.
+    fn fill_category_feed(&self, category: Category, grid: &gtk::FlowBox, status: &gtk::Label, scroller: &gtk::ScrolledWindow, ctx: &AppContext, handles: &UiHandles) {
+        for app in home_data::APPS.iter().filter(|app| app.category == category) {
+            self.shown_ids.borrow_mut().insert(app.flathub.to_string());
+        }
+        let paths: Vec<String> = category.flathub_categories().iter().map(|c| format!("category/{c}")).collect();
+        let state = Rc::new(RefCell::new((0usize, 0u32))); // (category index, last page)
+        let busy = Rc::new(Cell::new(false));
+        let load = {
+            let (page, grid, status, ctx, handles) = (self.clone(), grid.clone(), status.clone(), ctx.clone(), handles.clone());
+            Rc::new(move || {
+                if busy.replace(true) {
+                    return;
+                }
+                let (index, last) = *state.borrow();
+                let Some(path) = paths.get(index).cloned() else {
+                    status.set_text(t("That is everything for now."));
+                    return;
+                };
+                status.set_text(t("Loading more apps…"));
+                let (tx, rx) = mpsc::channel();
+                let next = last + 1;
+                std::thread::spawn(move || {
+                    let _ = tx.send(fetch_flathub(&path, next, 24));
+                });
+                let (page, grid, status, ctx, handles, state, busy) = (page.clone(), grid.clone(), status.clone(), ctx.clone(), handles.clone(), state.clone(), busy.clone());
+                glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+                    Ok(hits) => {
+                        let empty = hits.is_empty();
+                        let fresh: Vec<FlathubApp> = hits.into_iter().filter(|hit| page.shown_ids.borrow_mut().insert(hit.id.clone())).collect();
+                        page.append_flathub_tiles(&grid, &fresh, &ctx, &handles);
+                        let mut st = state.borrow_mut();
+                        if empty { st.0 += 1; st.1 = 0; } else { st.1 = next; }
+                        status.set_text("");
+                        busy.set(false);
+                        ControlFlow::Break
+                    }
+                    Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        status.set_text(t("No connection: more apps could not be loaded."));
+                        busy.set(false);
+                        ControlFlow::Break
+                    }
+                });
+            })
+        };
+        load();
+        let load_on_scroll = load.clone();
+        scroller.connect_edge_reached(move |_, position| {
+            if position == gtk::PositionType::Bottom {
+                load_on_scroll();
+            }
+        });
+    }
+
     /// Next page of Flathub's popular list, without apps that are already on the page.
     fn load_more(&self, ctx: &AppContext, handles: &UiHandles) {
         if self.discover_busy.replace(true) {
@@ -591,12 +646,21 @@ impl HomePage {
         for app in home_data::APPS.iter().filter(|app| app.category == category) {
             grid.insert(&self.app_tile(app, ctx, handles), -1);
         }
+        let more_grid = card::tile_grid();
+        let more_status = gtk::Label::new(None);
+        more_status.add_css_class("dim-label");
+        more_status.set_margin_bottom(24);
         content.append(&back);
         content.append(&title);
         content.append(&grid);
+        content.append(&more_grid);
+        content.append(&more_status);
         let scroller = gtk::ScrolledWindow::new();
         scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         scroller.set_child(Some(&content));
+        // Every category page keeps its own list of shown apps.
+        let feed_page = Self { shown_ids: Rc::new(RefCell::new(HashSet::new())), ..self.clone() };
+        feed_page.fill_category_feed(category, &more_grid, &more_status, &scroller, ctx, handles);
         let page = adw::NavigationPage::builder().title(category.label()).child(&scroller).build();
         handles.nav_view.push(&page);
     }
@@ -711,10 +775,8 @@ struct FlathubApp {
 /// Top apps of a Flathub collection ("popular" or "trending"); empty when offline.
 fn fetch_flathub(collection: &str, page: u32, per_page: u32) -> Vec<FlathubApp> {
     let url = format!("https://flathub.org/api/v2/collection/{collection}?page={page}&per_page={per_page}");
-    let Ok(response) = ureq::get(&url).timeout(Duration::from_secs(8)).call() else {
-        return Vec::new();
-    };
-    let Ok(json) = response.into_string().map_err(|_| ()).and_then(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(|_| ())) else {
+    // Lists change slowly: 12 hours fresh, older data still serves offline use.
+    let Some(json) = crate::core::webcache::get_json(&url, Duration::from_secs(12 * 3600), Duration::from_secs(8)) else {
         return Vec::new();
     };
     json["hits"]
@@ -745,10 +807,8 @@ fn clear_grid(grid: &gtk::FlowBox) {
 /// Native apps that many Arch/CachyOS users have installed (pkgstats), limited to desktop applications
 /// of the AppStream catalogue; (package, display name, summary). Empty when offline.
 fn fetch_native_popular() -> Vec<(String, String, String)> {
-    let Ok(response) = ureq::get("https://pkgstats.archlinux.de/api/packages?limit=2500&offset=0").timeout(Duration::from_secs(10)).call() else {
-        return Vec::new();
-    };
-    let Ok(json) = response.into_string().map_err(|_| ()).and_then(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(|_| ())) else {
+    let url = "https://pkgstats.archlinux.de/api/packages?limit=2500&offset=0";
+    let Some(json) = crate::core::webcache::get_json(url, Duration::from_secs(3 * 24 * 3600), Duration::from_secs(10)) else {
         return Vec::new();
     };
     json["packagePopularities"]

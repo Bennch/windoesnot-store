@@ -15,6 +15,7 @@ pub mod runner;
 pub mod sources;
 pub mod status;
 pub mod transactions;
+pub mod webcache;
 
 pub use appstream::*;
 pub use cache::*;

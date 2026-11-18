@@ -28,6 +28,18 @@ pub enum Category {
 }
 
 impl Category {
+    /// Flathub categories that fill this category's page below the curated apps.
+    pub fn flathub_categories(self) -> &'static [&'static str] {
+        match self {
+            Category::Create => &["Graphics", "Audio", "Video"],
+            Category::Work => &["Office", "Education", "Science"],
+            Category::Games => &["Game"],
+            Category::Social => &["Network"],
+            Category::Media => &["AudioVideo", "Audio", "Video"],
+            Category::Develop => &["Development"],
+        }
+    }
+
     pub const ALL: [Category; 6] = [
         Category::Create,
         Category::Work,
@@ -102,6 +114,37 @@ pub const APPS: &[HomeApp] = &[
     HomeApp { package: "heroic-games-launcher", flathub: "com.heroicgameslauncher.hgl", name: "Heroic", category: Category::Games, summary_de: "Epic-, GOG- und Amazon-Spiele", summary_en: "Epic, GOG and Amazon games" },
     HomeApp { package: "prismlauncher", flathub: "org.prismlauncher.PrismLauncher", name: "Prism Launcher", category: Category::Games, summary_de: "Minecraft mit Mods und Profilen", summary_en: "Minecraft with mods and profiles" },
     HomeApp { package: "retroarch", flathub: "org.libretro.RetroArch", name: "RetroArch", category: Category::Games, summary_de: "Klassische Konsolen emulieren", summary_en: "Emulate classic consoles" },
+    HomeApp { package: "teeworlds", flathub: "com.teeworlds.Teeworlds", name: "Teeworlds", category: Category::Games, summary_de: "Schnelle 2D-Mehrspieler-Action", summary_en: "Fast 2D multiplayer action" },
+    HomeApp { package: "supertuxkart", flathub: "net.supertuxkart.SuperTuxKart", name: "SuperTuxKart", category: Category::Games, summary_de: "Kart-Rennen mit Tux und Freunden", summary_en: "Kart racing with Tux and friends" },
+    HomeApp { package: "0ad", flathub: "com.play0ad.zeroad", name: "0 A.D.", category: Category::Games, summary_de: "Historisches Echtzeit-Strategiespiel", summary_en: "Historical real-time strategy" },
+    HomeApp { package: "xonotic", flathub: "org.xonotic.Xonotic", name: "Xonotic", category: Category::Games, summary_de: "Rasanter Ego-Shooter", summary_en: "Fast-paced first-person shooter" },
+    HomeApp { package: "wesnoth", flathub: "org.wesnoth.Wesnoth", name: "The Battle for Wesnoth", category: Category::Games, summary_de: "Rundenstrategie in einer Fantasywelt", summary_en: "Turn-based fantasy strategy" },
+    HomeApp { package: "openttd", flathub: "org.openttd.OpenTTD", name: "OpenTTD", category: Category::Games, summary_de: "Verkehrsimperium aufbauen", summary_en: "Build a transport empire" },
+    HomeApp { package: "luanti", flathub: "org.luanti.luanti", name: "Luanti", category: Category::Games, summary_de: "Offene Block-Welt (früher Minetest)", summary_en: "Open block sandbox (formerly Minetest)" },
+    HomeApp { package: "hedgewars", flathub: "org.hedgewars.Hedgewars", name: "Hedgewars", category: Category::Games, summary_de: "Igel-Artillerie, ähnlich wie Worms", summary_en: "Hedgehog artillery, like Worms" },
+    HomeApp { package: "widelands", flathub: "org.widelands.Widelands", name: "Widelands", category: Category::Games, summary_de: "Aufbau-Strategie mit Wirtschaft", summary_en: "Economy-focused strategy" },
+    HomeApp { package: "warzone2100", flathub: "net.wz2100.wz2100", name: "Warzone 2100", category: Category::Games, summary_de: "3D-Strategie auf der Zukunfts-Erde", summary_en: "3D strategy on a future Earth" },
+    HomeApp { package: "endless-sky", flathub: "io.github.endless_sky.endless_sky", name: "Endless Sky", category: Category::Games, summary_de: "Weltraum erkunden und kämpfen", summary_en: "Explore space and fight" },
+    HomeApp { package: "armagetronad", flathub: "org.armagetronad.ArmagetronAdvanced", name: "Armagetron Advanced", category: Category::Games, summary_de: "Tron-Lichtmotorräder in 3D", summary_en: "Tron light cycles in 3D" },
+    HomeApp { package: "extremetuxracer", flathub: "net.sourceforge.ExtremeTuxRacer", name: "Extreme Tux Racer", category: Category::Games, summary_de: "Mit Tux den Berg hinunter", summary_en: "Race Tux down the mountain" },
+    HomeApp { package: "supertux", flathub: "org.supertuxproject.SuperTux", name: "SuperTux", category: Category::Games, summary_de: "Klassisches 2D-Jump-'n'-Run", summary_en: "Classic 2D platformer" },
+    HomeApp { package: "pingus", flathub: "", name: "Pingus", category: Category::Games, summary_de: "Rätselspiel im Stil von Lemmings", summary_en: "Lemmings-style puzzle game" },
+    HomeApp { package: "pioneer", flathub: "net.pioneerspacesim.Pioneer", name: "Pioneer", category: Category::Games, summary_de: "Einsames Weltraum-Abenteuer", summary_en: "Lonely space adventure" },
+    HomeApp { package: "simutrans", flathub: "com.simutrans.Simutrans", name: "Simutrans", category: Category::Games, summary_de: "Verkehrssimulation", summary_en: "Transportation simulation" },
+    HomeApp { package: "openmw", flathub: "org.openmw.OpenMW", name: "OpenMW", category: Category::Games, summary_de: "Morrowind-Engine, frei und modern", summary_en: "Free modern Morrowind engine" },
+    HomeApp { package: "openrct2", flathub: "io.openrct2.OpenRCT2", name: "OpenRCT2", category: Category::Games, summary_de: "Freizeitpark-Klassiker (Originaldaten nötig)", summary_en: "Theme park classic (needs original files)" },
+    HomeApp { package: "openra", flathub: "net.openra.OpenRA", name: "OpenRA", category: Category::Games, summary_de: "Command & Conquer: Alarmstufe Rot und mehr", summary_en: "Red Alert and other C&C classics" },
+    HomeApp { package: "shattered-pixel-dungeon", flathub: "com.shatteredpixel.shatteredpixeldungeon", name: "Shattered Pixel Dungeon", category: Category::Games, summary_de: "Roguelike-Dungeon mit Pixelgrafik", summary_en: "Pixel-art roguelike dungeon" },
+    HomeApp { package: "cataclysm-dda", flathub: "org.cataclysmdda.CataclysmDDA", name: "Cataclysm: Dark Days Ahead", category: Category::Games, summary_de: "Roguelike nach der Apokalypse", summary_en: "Post-apocalyptic roguelike" },
+    HomeApp { package: "crawl-tiles", flathub: "org.develz.Crawl", name: "Dungeon Crawl Stone Soup", category: Category::Games, summary_de: "Klassisches Dungeon-Roguelike", summary_en: "Classic dungeon roguelike" },
+    HomeApp { package: "scummvm", flathub: "org.scummvm.ScummVM", name: "ScummVM", category: Category::Games, summary_de: "Klassische Point-and-Click-Adventures", summary_en: "Classic point-and-click adventures" },
+    HomeApp { package: "sauerbraten", flathub: "org.sauerbraten.Sauerbraten", name: "Cube 2: Sauerbraten", category: Category::Games, summary_de: "Schneller Ego-Shooter, kostenlos", summary_en: "Fast free first-person shooter" },
+    HomeApp { package: "dolphin-emu", flathub: "org.DolphinEmu.dolphin-emu", name: "Dolphin", category: Category::Games, summary_de: "GameCube- und Wii-Spiele", summary_en: "GameCube and Wii games" },
+    HomeApp { package: "ppsspp", flathub: "org.ppsspp.PPSSPP", name: "PPSSPP", category: Category::Games, summary_de: "PSP-Spiele abspielen", summary_en: "Play PSP games" },
+    HomeApp { package: "gnome-chess", flathub: "org.gnome.Chess", name: "Schach", category: Category::Games, summary_de: "Schach gegen den Computer", summary_en: "Chess against the computer" },
+    HomeApp { package: "gnome-mines", flathub: "org.gnome.Mines", name: "Minen", category: Category::Games, summary_de: "Der Minesweeper-Klassiker", summary_en: "The Minesweeper classic" },
+    HomeApp { package: "gnome-sudoku", flathub: "org.gnome.Sudoku", name: "Sudoku", category: Category::Games, summary_de: "Zahlenrätsel mit Hilfen", summary_en: "Number puzzles with hints" },
+    HomeApp { package: "aisleriot", flathub: "org.gnome.Aisleriot", name: "Solitaire-Sammlung", category: Category::Games, summary_de: "Über 80 Patience-Spiele", summary_en: "Over 80 solitaire games" },
     HomeApp { package: "discord", flathub: "com.discordapp.Discord", name: "Discord", category: Category::Social, summary_de: "Chat, Sprache und Video für Gruppen", summary_en: "Chat, voice and video for groups" },
     HomeApp { package: "telegram-desktop", flathub: "org.telegram.desktop", name: "Telegram", category: Category::Social, summary_de: "Schneller Messenger", summary_en: "Fast messenger" },
     HomeApp { package: "signal-desktop", flathub: "org.signal.Signal", name: "Signal", category: Category::Social, summary_de: "Privat und verschlüsselt schreiben", summary_en: "Private, encrypted messaging" },
