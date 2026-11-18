@@ -10,7 +10,9 @@ use crate::ui::details;
 use crate::ui::updates::{classify_packages, Info, Topic};
 use crate::ui::widgets::app_icon::app_icon;
 use crate::ui::{AppContext, UiHandles};
-use crate::i18n::t;
+use crate::i18n::{t, tf};
+use libadwaita as adw;
+use adw::prelude::*;
 
 #[derive(Clone)]
 pub struct InstalledPage {
@@ -268,12 +270,20 @@ fn build_row(pkg: PackageSummary, handles: &UiHandles, ctx: &AppContext) -> gtk:
     content.append(&status_badge);
 
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    actions.set_width_request(170);
+    actions.set_width_request(260);
     let details_btn = gtk::Button::with_label(t("Details"));
     details_btn.add_css_class("flat");
     let remove_btn = gtk::Button::with_label(t("Remove"));
     remove_btn.add_css_class("destructive-action");
     actions.append(&details_btn);
+    if pkg.source == PackageSource::Repo {
+        let version_btn = gtk::Button::with_label(t("Version…"));
+        version_btn.add_css_class("flat");
+        let queue = handles.queue.clone();
+        let name = pkg.name.clone();
+        version_btn.connect_clicked(move |_| show_version_dialog(&queue, &name));
+        actions.append(&version_btn);
+    }
     actions.append(&remove_btn);
     content.append(&actions);
 
@@ -355,4 +365,49 @@ fn render_list(
         }
         list.append(&build_row(pkg.clone(), handles, ctx));
     }
+}
+
+
+/// Lists cached older versions of an installed repository package and installs the chosen one.
+fn show_version_dialog(queue: &crate::ui::QueueController, name: &str) {
+    use crate::core::downgrade;
+    let installed = downgrade::installed_version(name).unwrap_or_default();
+    let candidates = downgrade::older_candidates(name, &installed, &downgrade::read_cache(std::path::Path::new(downgrade::CACHE_DIR)));
+    let parent = queue.parent_window();
+    if candidates.is_empty() {
+        let dialog = adw::MessageDialog::new(
+            Some(&parent),
+            Some(&tf("No older version of {} available", &[&name])),
+            Some(t("Only versions that are still in the package cache can be restored. Older versions appear here after later updates.")),
+        );
+        dialog.add_response("ok", t("OK"));
+        dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
+        dialog.present();
+        return;
+    }
+    let labels: Vec<String> = candidates.iter().map(|c| c.version.clone()).collect();
+    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let dropdown = gtk::DropDown::from_strings(&refs);
+    let dialog = adw::MessageDialog::new(
+        Some(&parent),
+        Some(&tf("Restore an older version of {}", &[&name])),
+        Some(&tf(
+            "Installed: {}. The package manager checks dependencies; if other packages need the newer version, nothing is changed. The package stays eligible for later updates.",
+            &[&installed],
+        )),
+    );
+    dialog.set_extra_child(Some(&dropdown));
+    dialog.add_response("cancel", t("Cancel"));
+    dialog.add_response("restore", t("Install this version"));
+    dialog.set_response_appearance("restore", adw::ResponseAppearance::Destructive);
+    let queue = queue.clone();
+    dialog.connect_response(None, move |d: &adw::MessageDialog, response| {
+        if response == "restore" {
+            if let Some(candidate) = candidates.get(dropdown.selected() as usize) {
+                queue.run_downgrade(&candidate.path);
+            }
+        }
+        d.close();
+    });
+    dialog.present();
 }

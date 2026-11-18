@@ -222,6 +222,24 @@ impl QueueController {
         self.show_review_dialog_for(None);
     }
 
+    /// Installs an older cached package file through the privileged helper (`pacman -U`).
+    pub fn run_downgrade(&self, file: &std::path::Path) {
+        let Some(path) = file.to_str() else { return };
+        let mut args = vec![crate::core::transactions::helper_path_public(), "pacman".to_string(), "-U".to_string()];
+        if self.ctx.settings.lock().unwrap().allow_noconfirm
+            || self.ctx.settings.lock().unwrap().terminal_mode == crate::core::TerminalMode::Integrated
+        {
+            args.push("--noconfirm".to_string());
+        }
+        args.push(path.to_string());
+        let plan = TransactionPlan { commands: vec![crate::core::CommandSpec::new("pkexec", args)] };
+        start_checked_plan(plan, self.ctx.clone(), self.log_drawer.clone(), self.parent.clone(), self.toasts.clone(), self.finished.clone(), None);
+    }
+
+    pub fn parent_window(&self) -> adw::ApplicationWindow {
+        self.parent.clone()
+    }
+
     fn execute_action(&self, action: TransactionAction) {
         let queue = TransactionQueue { actions: vec![action] };
         let plan = match plan_transactions(&queue, &self.ctx.settings.lock().unwrap()) {
