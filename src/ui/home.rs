@@ -1,4 +1,5 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -42,6 +43,17 @@ pub struct HomePage {
     popular: gtk::FlowBox,
     trending_title: gtk::Label,
     trending: gtk::FlowBox,
+    /// Popular native apps of Arch users (pkgstats) that have a catalogue entry.
+    native_title: gtk::Label,
+    native: gtk::FlowBox,
+    /// Endless list below: Flathub popular pages 2, 3, ... loaded when the page is scrolled to the end.
+    discover_title: gtk::Label,
+    discover: gtk::FlowBox,
+    discover_status: gtk::Label,
+    discover_page: Rc<Cell<u32>>,
+    discover_busy: Rc<Cell<bool>>,
+    shown_ids: Rc<RefCell<HashSet<String>>>,
+    scroller: gtk::ScrolledWindow,
     /// Install buttons of Flathub-only tiles, by application id.
     flatpak_buttons: Rc<RefCell<Vec<(String, gtk::Button)>>>,
     /// Install buttons by app, so installed apps can be marked.
@@ -130,10 +142,24 @@ impl HomePage {
         let trending_title = section(t("Trending"));
         let trending = card::tile_grid();
         trending.set_visible(false);
+        let native_title = section(t("Popular with Arch users"));
+        let native = card::tile_grid();
+        native.set_visible(false);
+        let discover_title = section(t("Discover more"));
+        let discover = card::tile_grid();
+        discover.set_visible(false);
+        let discover_status = gtk::Label::new(None);
+        discover_status.add_css_class("dim-label");
+        discover_status.set_margin_bottom(24);
         browse.append(&popular_title);
         browse.append(&popular);
+        browse.append(&native_title);
+        browse.append(&native);
         browse.append(&trending_title);
         browse.append(&trending);
+        browse.append(&discover_title);
+        browse.append(&discover);
+        browse.append(&discover_status);
 
         // Quick search: results appear here while typing and replace the browse area.
         let quick = gtk::Box::new(gtk::Orientation::Vertical, 12);
@@ -184,6 +210,15 @@ impl HomePage {
             popular,
             trending_title,
             trending,
+            native_title,
+            native,
+            discover_title,
+            discover,
+            discover_status,
+            discover_page: Rc::new(Cell::new(1)),
+            discover_busy: Rc::new(Cell::new(false)),
+            shown_ids: Rc::new(RefCell::new(HashSet::new())),
+            scroller,
             flatpak_buttons: Rc::new(RefCell::new(Vec::new())),
             buttons: Rc::new(RefCell::new(Vec::new())),
             installed: Rc::new(RefCell::new(None)),
@@ -323,13 +358,26 @@ impl HomePage {
     fn load_flathub(&self, ctx: &AppContext, handles: &UiHandles) {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send((fetch_flathub("popular"), fetch_flathub("trending")));
+            let _ = tx.send((fetch_flathub("popular", 1, 24), fetch_flathub("trending", 1, 24), fetch_native_popular()));
         });
         let (page, ctx, handles) = (self.clone(), ctx.clone(), handles.clone());
         glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
-            Ok((popular, trending)) => {
+            Ok((popular, trending, native)) => {
+                for hit in popular.iter().chain(trending.iter()) {
+                    page.shown_ids.borrow_mut().insert(hit.id.clone());
+                }
                 page.fill_flathub(&page.popular_title, &page.popular, &popular, &ctx, &handles);
+                page.fill_native(&native, &ctx, &handles);
                 page.fill_flathub(&page.trending_title, &page.trending, &trending, &ctx, &handles);
+                page.discover_title.set_visible(true);
+                page.discover.set_visible(true);
+                page.load_more(&ctx, &handles);
+                let (more, ctx_scroll, handles_scroll) = (page.clone(), ctx.clone(), handles.clone());
+                page.scroller.connect_edge_reached(move |_, position| {
+                    if position == gtk::PositionType::Bottom {
+                        more.load_more(&ctx_scroll, &handles_scroll);
+                    }
+                });
                 ControlFlow::Break
             }
             Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
@@ -337,7 +385,84 @@ impl HomePage {
         });
     }
 
+    /// Next page of Flathub's popular list, without apps that are already on the page.
+    fn load_more(&self, ctx: &AppContext, handles: &UiHandles) {
+        if self.discover_busy.replace(true) {
+            return;
+        }
+        let next = self.discover_page.get() + 1;
+        self.discover_status.set_text(t("Loading more apps…"));
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(fetch_flathub("popular", next, 24));
+        });
+        let (page, ctx, handles) = (self.clone(), ctx.clone(), handles.clone());
+        glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+            Ok(hits) => {
+                page.discover_page.set(next);
+                let fresh: Vec<FlathubApp> = hits.into_iter().filter(|hit| page.shown_ids.borrow_mut().insert(hit.id.clone())).collect();
+                let reached_end = fresh.is_empty() && next > 140;
+                page.append_flathub_tiles(&page.discover, &fresh, &ctx, &handles);
+                page.discover_status.set_text(if reached_end { t("That is everything for now.") } else { "" });
+                page.discover_busy.set(reached_end);
+                ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                page.discover_status.set_text(t("No connection: more apps could not be loaded."));
+                page.discover_busy.set(false);
+                ControlFlow::Break
+            }
+        });
+    }
+
+    fn fill_native(&self, apps: &[(String, String, String)], ctx: &AppContext, handles: &UiHandles) {
+        for (package, name, summary) in apps {
+            let queue = handles.queue.clone();
+            let (ctx_details, handles_details) = (ctx.clone(), handles.clone());
+            let (install_name, detail_name, summary_text) = (package.clone(), package.clone(), summary.clone());
+            let (tile, button) = card::build_tile(
+                package,
+                name,
+                None,
+                summary,
+                Some("Pacman"),
+                move || queue.add_install(install_name.clone(), PackageSource::Repo, None),
+                move || {
+                    crate::ui::details::show_details(
+                        &ctx_details,
+                        &handles_details,
+                        PackageSummary {
+                            name: detail_name.clone(),
+                            summary: summary_text.clone(),
+                            version: String::new(),
+                            source: PackageSource::Repo,
+                            installed: false,
+                            origin: None,
+                            installed_via: None,
+                        },
+                        None,
+                    )
+                },
+            );
+            if let Some(installed) = self.installed.borrow().as_ref() {
+                card::mark_installed(&button, installed.find(package, None).first().map(|i| i.source));
+            }
+            self.native.insert(&tile, -1);
+        }
+        let any = !apps.is_empty();
+        self.native_title.set_visible(any);
+        self.native.set_visible(any);
+    }
+
     fn fill_flathub(&self, title: &gtk::Label, grid: &gtk::FlowBox, hits: &[FlathubApp], ctx: &AppContext, handles: &UiHandles) {
+        self.append_flathub_tiles(grid, hits, ctx, handles);
+        let any = !hits.is_empty();
+        title.set_visible(any);
+        grid.set_visible(any);
+    }
+
+    fn append_flathub_tiles(&self, grid: &gtk::FlowBox, hits: &[FlathubApp], ctx: &AppContext, handles: &UiHandles) {
         for hit in hits {
             if let Some(app) = home_data::APPS.iter().find(|app| app.flathub == hit.id) {
                 grid.insert(&self.app_tile(app, ctx, handles), -1);
@@ -376,9 +501,6 @@ impl HomePage {
             self.flatpak_buttons.borrow_mut().push((hit.id.clone(), button));
             grid.insert(&tile, -1);
         }
-        let any = !hits.is_empty();
-        title.set_visible(any);
-        grid.set_visible(any);
     }
 
     fn banner(&self, app: &'static HomeApp, css_class: &str, ctx: &AppContext, handles: &UiHandles) -> gtk::Widget {
@@ -587,8 +709,8 @@ struct FlathubApp {
 }
 
 /// Top apps of a Flathub collection ("popular" or "trending"); empty when offline.
-fn fetch_flathub(collection: &str) -> Vec<FlathubApp> {
-    let url = format!("https://flathub.org/api/v2/collection/{collection}");
+fn fetch_flathub(collection: &str, page: u32, per_page: u32) -> Vec<FlathubApp> {
+    let url = format!("https://flathub.org/api/v2/collection/{collection}?page={page}&per_page={per_page}");
     let Ok(response) = ureq::get(&url).timeout(Duration::from_secs(8)).call() else {
         return Vec::new();
     };
@@ -607,7 +729,7 @@ fn fetch_flathub(collection: &str) -> Vec<FlathubApp> {
                         summary: hit["summary"].as_str().unwrap_or("").to_string(),
                     })
                 })
-                .take(12)
+                .take(per_page as usize)
                 .collect()
         })
         .unwrap_or_default()
@@ -617,4 +739,29 @@ fn clear_grid(grid: &gtk::FlowBox) {
     while let Some(child) = grid.first_child() {
         grid.remove(&child);
     }
+}
+
+
+/// Native apps that many Arch/CachyOS users have installed (pkgstats), limited to desktop applications
+/// of the AppStream catalogue; (package, display name, summary). Empty when offline.
+fn fetch_native_popular() -> Vec<(String, String, String)> {
+    let Ok(response) = ureq::get("https://pkgstats.archlinux.de/api/packages?limit=2500&offset=0").timeout(Duration::from_secs(10)).call() else {
+        return Vec::new();
+    };
+    let Ok(json) = response.into_string().map_err(|_| ()).and_then(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(|_| ())) else {
+        return Vec::new();
+    };
+    json["packagePopularities"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row["name"].as_str())
+                .filter_map(|package| {
+                    let (name, summary) = crate::core::icons::catalogue_app(package)?;
+                    Some((package.to_string(), name, summary))
+                })
+                .take(36)
+                .collect()
+        })
+        .unwrap_or_default()
 }

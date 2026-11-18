@@ -121,7 +121,7 @@ pub fn display_name(package: &str, flathub_id: Option<&str>, fallback: &str) -> 
             return name.clone();
         }
     }
-    if let Some(name) = base_names(package).iter().find_map(|n| arch_names().get(n)) {
+    if let Some((name, _)) = base_names(package).iter().find_map(|n| arch_names().get(n)) {
         return name.clone();
     }
     let candidate = flathub_id.unwrap_or(fallback);
@@ -129,6 +129,13 @@ pub fn display_name(package: &str, flathub_id: Option<&str>, fallback: &str) -> 
         return readable_id(candidate);
     }
     fallback.to_string()
+}
+
+/// Desktop application of the Arch catalogue with an icon: (display name, summary). None for libraries and CLI tools.
+pub fn catalogue_app(package: &str) -> Option<(String, String)> {
+    let entry = arch_names().get(package)?;
+    arch_index().get(package)?;
+    Some(entry.clone())
 }
 
 fn looks_like_app_id(text: &str) -> bool {
@@ -162,8 +169,8 @@ fn flathub_names() -> &'static HashMap<String, String> {
 }
 
 /// Package name -> name from the Arch AppStream catalogue (`<pkgname>` + untranslated `<name>`).
-fn arch_names() -> &'static HashMap<String, String> {
-    static NAMES: OnceLock<HashMap<String, String>> = OnceLock::new();
+fn arch_names() -> &'static HashMap<String, (String, String)> {
+    static NAMES: OnceLock<HashMap<String, (String, String)>> = OnceLock::new();
     NAMES.get_or_init(|| {
         use std::io::Read;
         let mut names = HashMap::new();
@@ -174,7 +181,8 @@ fn arch_names() -> &'static HashMap<String, String> {
             if flate2::read::GzDecoder::new(handle).read_to_string(&mut xml).is_err() { continue; }
             for component in xml.split("<component").skip(1) {
                 if let (Some(pkg), Some(name)) = (between(component, "<pkgname>", "</pkgname>"), between(component, "<name>", "</name>")) {
-                    names.entry(pkg.to_string()).or_insert_with(|| xml_unescape(name));
+                    let summary = between(component, "<summary>", "</summary>").map(xml_unescape).unwrap_or_default();
+                    names.entry(pkg.to_string()).or_insert_with(|| (xml_unescape(name), summary));
                 }
             }
         }
