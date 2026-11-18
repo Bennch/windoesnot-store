@@ -813,8 +813,12 @@ pub fn build_ui(app: &adw::Application) {
     updates_page.bind(ctx.clone());
     let updates_after_transaction = updates_page.clone();
     let ctx_after_transaction = ctx.clone();
+    let installed_after_transaction = installed_page.clone();
+    let handles_after_transaction = handles.clone();
     queue_controller.connect_finished(move || {
         updates_after_transaction.refresh(ctx_after_transaction.clone(), None);
+        // A removed or installed app must show up in the Installed list without reopening the page.
+        installed_after_transaction.refresh(ctx_after_transaction.clone(), handles_after_transaction.clone());
     });
     let aur_updates = updates_page.clone();
     let aur_context = ctx.clone();
