@@ -188,20 +188,22 @@ impl CommandRunner {
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
 
-            if let Some(out) = stdout {
+            let out_reader = stdout.map(|out| {
                 let tx = sender.clone();
-                thread::spawn(move || stream_reader(out, tx));
-            }
-
-            if let Some(err) = stderr {
+                thread::spawn(move || stream_reader(out, tx))
+            });
+            let err_reader = stderr.map(|err| {
                 let tx = sender.clone();
-                thread::spawn(move || stream_reader(err, tx));
-            }
+                thread::spawn(move || stream_reader(err, tx))
+            });
 
             let status = match child.wait() {
                 Ok(status) => status.code().unwrap_or(1),
                 Err(_) => 1,
             };
+            // Drain both pipes before reporting completion, including final stderr.
+            if let Some(reader) = out_reader { let _ = reader.join(); }
+            if let Some(reader) = err_reader { let _ = reader.join(); }
             let _ = sender.send(LogEvent::Finished(status));
         });
 

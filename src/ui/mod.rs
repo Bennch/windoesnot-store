@@ -1354,6 +1354,11 @@ fn run_plan(
             return;
         }
         let cmd = cmds.remove(0);
+        let pacman_upgrade = cmd.args.iter().any(|arg| arg == "pacman")
+            && cmd.args.iter().any(|arg| arg == "-Syu");
+        let dependency_failure = Rc::new(RefCell::new(false));
+        let unsatisfied: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let transaction_started = Rc::new(RefCell::new(false));
         log_drawer.begin_command();
         let interactive = !cmd.args.iter().any(|arg| arg == "--noconfirm");
         let command_trace = format!("$ {}", cmd.display_line());
@@ -1423,6 +1428,20 @@ fn run_plan(
                             );
                         }
                         log_drawer.append_line(&line, log_limit);
+                        if pacman_upgrade && is_pacman_dependency_failure(&line) {
+                            *dependency_failure.borrow_mut() = true;
+                        }
+                        if pacman_upgrade {
+                            if let Some(item) = unsatisfied_dependency(&line) {
+                                let mut list = unsatisfied.borrow_mut();
+                                if list.len() < 5 && !list.contains(&item) {
+                                    list.push(item);
+                                }
+                            }
+                            if is_package_progress_line(&line) {
+                                *transaction_started.borrow_mut() = true;
+                            }
+                        }
                         if is_component_abi_conflict(&line) {
                             *abi_conflict.borrow_mut() = true;
                         }
@@ -1458,11 +1477,23 @@ fn run_plan(
                             let (heading, body) = if *abi_conflict.borrow() {
                                 (t("System update not possible yet"),
                                  t("The new system packages need matching WinDoesNot components, which are not available yet. Nothing was changed and the remaining actions were not run. Please try again later."))
+                            } else if *transaction_started.borrow() && pacman_upgrade {
+                                (t("Update incomplete"),
+                                 t("The system update stopped after package changes had begun. Do not restart yet: run the update again and wait until it finishes. Details are in the log."))
+                            } else if *dependency_failure.borrow() {
+                                (t("System update could not be prepared"),
+                                 t("The package manager could not resolve the required dependencies, so this system update was not installed. Earlier actions in the queue may already have completed; remaining actions were not run. See the log for the affected packages. Wait and retry the full update later. See Known limitations: https://windoesnot.me/en/help/known-limitations/#libffi-update"))
                             } else {
                                 (t("Action failed"),
                                  t("The remaining actions were not run. Details are in the log."))
                             };
-                            let dialog = adw::MessageDialog::new(Some(&parent), Some(heading), Some(body));
+                            let affected = unsatisfied.borrow().join("\n");
+                            let body_text = if *dependency_failure.borrow() && !affected.is_empty() {
+                                format!("{body}\n\n{}\n{affected}", t("Affected packages:"))
+                            } else {
+                                body.to_string()
+                            };
+                            let dialog = adw::MessageDialog::new(Some(&parent), Some(heading), Some(&body_text));
                             dialog.add_response("ok", t("OK"));
                             dialog.connect_response(None, |d: &adw::MessageDialog, _| d.close());
                             dialog.present();
@@ -1509,6 +1540,38 @@ fn active_package_managers() -> Result<Vec<String>, String> {
         }
     }
     Ok(active)
+}
+
+/// "unable to satisfy dependency 'X' required by Y" (English or German pacman output) -> "X (Y)".
+fn unsatisfied_dependency(line: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+    if !(lower.contains("unable to satisfy dependency") || lower.contains("unerfüllbare abhängigkeit")) {
+        return None;
+    }
+    let dep: String = line.split(|c| c == '\'' || c == '»' || c == '«').nth(1)?.trim().to_string();
+    let by = line.rsplit(|c: char| c == ' ').next().unwrap_or("").trim().to_string();
+    if dep.is_empty() || by.is_empty() { return None; }
+    Some(format!("{dep} ({by})"))
+}
+
+/// "(3/120) upgrading foo" style lines after the preparation phase; checks and key lines do not count.
+fn is_package_progress_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.strip_prefix('(') else { return false };
+    let Some((counter, text)) = rest.split_once(')') else { return false };
+    let mut parts = counter.split('/');
+    let numeric = parts.next().map_or(false, |a| !a.is_empty() && a.chars().all(|c| c.is_ascii_digit()))
+        && parts.next().map_or(false, |b| !b.is_empty() && b.chars().all(|c| c.is_ascii_digit()));
+    if !numeric { return false; }
+    let lower = text.to_lowercase();
+    !["checking", "prüf", "loading", "lade", "keyring", "schlüssel", "conflict", "konflikt", "disk space", "speicherplatz", "integrity", "integrität", "retrieving", "download"]
+        .iter().any(|w| lower.contains(w))
+}
+
+fn is_pacman_dependency_failure(line: &str) -> bool {
+    let line = line.to_lowercase();
+    (line.contains("failed to prepare transaction") && line.contains("could not satisfy dependencies"))
+        || (line.contains("vorgang konnte nicht vorbereitet werden") && line.contains("abhängigkeiten nicht erfüllen"))
 }
 
 /// pacman refuses a full upgrade because a WinDoesNot package pins the exact
@@ -2338,7 +2401,24 @@ pub(crate) fn apply_theme(theme: ThemeMode) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_component_abi_conflict;
+    use super::{is_component_abi_conflict, is_pacman_dependency_failure, is_package_progress_line, unsatisfied_dependency};
+
+    #[test]
+    fn extracts_unsatisfied_dependency_and_progress() {
+        assert_eq!(unsatisfied_dependency(":: unable to satisfy dependency 'firefox>=160.0.1' required by firefox-i18n-de").as_deref(), Some("firefox>=160.0.1 (firefox-i18n-de)"));
+        assert_eq!(unsatisfied_dependency(":: Unerfüllbare Abhängigkeit »libffi=3.8.1«, benötigt von lib32-libffi").as_deref(), Some("libffi=3.8.1 (lib32-libffi)"));
+        assert!(is_package_progress_line("(12/120) upgrading mesa"));
+        assert!(!is_package_progress_line("(12/120) checking keys in keyring"));
+        assert!(!is_package_progress_line("error: failed to prepare transaction"));
+    }
+
+    #[test]
+    fn detects_unresolvable_pacman_stderr() {
+        let stderr = "warning: cannot resolve \"libffi=3.8.1\" (a dependency of \"lib32-libffi\")\nerror: failed to prepare transaction (could not satisfy dependencies)\n:: unable to satisfy dependency 'libffi=3.8.1' required by lib32-libffi";
+        assert!(stderr.lines().any(is_pacman_dependency_failure));
+        assert!(is_pacman_dependency_failure("Fehler: Vorgang konnte nicht vorbereitet werden (Kann Abhängigkeiten nicht erfüllen)"));
+        assert!(!is_pacman_dependency_failure("error: failed to commit transaction (conflicting files)"));
+    }
 
     #[test]
     fn detects_pinned_component_conflicts_only() {
