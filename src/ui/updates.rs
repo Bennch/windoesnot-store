@@ -29,6 +29,7 @@ pub struct UpdatesPage {
     select_all_button: gtk::Button,
     clear_selection_button: gtk::Button,
     apply_button: gtk::Button,
+    only_button: gtk::Button,
     apply_selected_button: gtk::Button,
     list: gtk::ListBox,
     status: gtk::Label,
@@ -94,7 +95,7 @@ impl UpdatesPage {
         search.set_placeholder_text(Some(t("Filter updates")));
         root.append(&search);
         let source_filter =
-            gtk::DropDown::from_strings(&[t("Everything"), t("System (Pacman)"), t("AUR"), t("Programs (Flatpak)")]);
+            gtk::DropDown::from_strings(&[t("Everything"), t("System (Pacman)"), t("AUR"), t("Programs (Flatpak)"), t("WinDoesNot only")]);
         source_filter.set_selected(0);
         root.append(&source_filter);
         let topic_filter = gtk::DropDown::from_strings(&[
@@ -113,6 +114,8 @@ impl UpdatesPage {
         // is a partial upgrade and breaks plugins built against the exact Hyprland ABI.
         apply_button.add_css_class("suggested-action");
         buttons.append(&apply_button);
+        let only_button = gtk::Button::with_label(t("Update WinDoesNot only"));
+        buttons.append(&only_button);
         root.append(&buttons);
 
         let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
@@ -137,6 +140,7 @@ impl UpdatesPage {
             select_all_button,
             clear_selection_button,
             apply_button,
+            only_button,
             apply_selected_button,
             list,
             status,
@@ -204,6 +208,7 @@ impl UpdatesPage {
         let topics = self.topics.clone();
         let group_callback = self.group_callback.clone();
         self.source_filter.connect_selected_notify(move |f| {
+            apply_button.set_visible(f.selected() != 4);
             apply_button.set_label(update_button_label(f.selected()));
             let query = search.text().to_string();
             let items = all_updates.borrow();
@@ -316,6 +321,19 @@ impl UpdatesPage {
         });
     }
 
+    pub fn connect_only<F: Fn() + 'static>(&self, f: F) {
+        let filter = self.source_filter.clone();
+        let topic = self.topic_filter.clone();
+        let search = self.search.clone();
+        self.only_button.connect_clicked(move |_| { search.set_text(""); topic.set_selected(0); filter.set_selected(4); f(); });
+    }
+
+    pub fn select_windoesnot(&self) {
+        self.search.set_text("");
+        self.topic_filter.set_selected(0);
+        self.source_filter.set_selected(4);
+    }
+
     pub fn connect_install_plugins<F: Fn() + 'static>(&self, f: F) {
         self.plugins_banner.connect_button_clicked(move |banner| {
             f();
@@ -396,6 +414,7 @@ fn render_updates(
             1 => action.source == PackageSource::Repo,
             2 => action.source == PackageSource::Aur,
             3 => action.source == PackageSource::Flatpak,
+            4 => action.source == PackageSource::Repo && action.name.starts_with("windoesnot-"),
             _ => true,
         })
         .filter(|(action, _)| {
@@ -469,7 +488,7 @@ fn render_updates(
                     f(queue_actions.clone());
                 }
             });
-            header.append(&button);
+            if source_filter_idx != 4 { header.append(&button); }
             let header_row = gtk::ListBoxRow::new();
             header_row.set_selectable(false);
             header_row.set_activatable(false);

@@ -777,12 +777,29 @@ pub fn build_ui(app: &adw::Application) {
         }
     });
     // Opened from the desktop settings with --updates or --upgrade.
-    if matches!(START_PAGE.get(), Some(&"updates") | Some(&"upgrade")) {
+    if matches!(START_PAGE.get(), Some(&"updates") | Some(&"upgrade") | Some(&"windoesnot-updates")) {
         sidebar.select_row(sidebar.row_at_index(3).as_ref());
     }
 
     updates_page.connect_apply_all(clone!(@strong queue_controller => move |only| {
         queue_controller.add_upgrade_source(only);
+    }));
+
+    if START_PAGE.get() == Some(&"windoesnot-updates") { updates_page.select_windoesnot(); }
+    updates_page.connect_only(clone!(@strong queue_controller => move || {
+        let dialog = adw::MessageDialog::new(Some(&queue_controller.parent), Some(t("Update WinDoesNot only")),
+            Some(t("Only WinDoesNot packages will be updated. If other packages are required, the update stops.")));
+        dialog.add_response("cancel", t("Cancel"));
+        dialog.add_response("update", t("Update"));
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let controller = queue_controller.clone();
+        dialog.connect_response(Some("update"), move |_, _| {
+            let args = vec![crate::core::transactions::helper_path_public(), "pacman".to_string(), "--windoesnot-only".to_string(), "--noconfirm".to_string()];
+            let plan = TransactionPlan { commands: vec![crate::core::CommandSpec::new("pkexec", args)] };
+            start_checked_plan(plan, controller.ctx.clone(), controller.log_drawer.clone(), controller.parent.clone(), controller.toasts.clone(), controller.finished.clone(), None);
+        });
+        dialog.present();
     }));
 
     updates_page.connect_install_plugins(clone!(@strong queue_controller => move || {
@@ -915,6 +932,17 @@ pub fn build_ui(app: &adw::Application) {
         window_for_installed.present();
     });
     app.add_action(&installed_action);
+
+    let only_action = gio::SimpleAction::new("show-windoesnot-updates", None);
+    let sidebar_for_only = sidebar.clone();
+    let page_for_only = updates_page.clone();
+    let window_for_only = window.clone();
+    only_action.connect_activate(move |_, _| {
+        sidebar_for_only.select_row(sidebar_for_only.row_at_index(3).as_ref());
+        page_for_only.select_windoesnot();
+        window_for_only.present();
+    });
+    app.add_action(&only_action);
 
     // A Start-menu request may arrive while Store is already running. The
     // application action is available after activation in either case.
@@ -1389,7 +1417,7 @@ fn run_plan(
         }
         let cmd = cmds.remove(0);
         let pacman_upgrade = cmd.args.iter().any(|arg| arg == "pacman")
-            && cmd.args.iter().any(|arg| arg == "-Syu");
+            && cmd.args.iter().any(|arg| arg == "-Syu" || arg == "--windoesnot-only");
         let dependency_failure = Rc::new(RefCell::new(false));
         let unsatisfied: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let transaction_started = Rc::new(RefCell::new(false));

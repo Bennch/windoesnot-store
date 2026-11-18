@@ -46,9 +46,17 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
     // Some helper invocations include "pacman" twice:
     // windoesnot-store-helper pacman pacman -S ...
     if matches!(args.first(), Some(arg) if arg == "pacman") {
+        if args.get(1).map(String::as_str) == Some("--windoesnot-only") {
+            return Err(anyhow!("invalid windoesnot-only arguments"));
+        }
         args.remove(0);
     }
 
+    if args.first().map(String::as_str) == Some("--windoesnot-only") {
+        validate_windoesnot_only(&args)?;
+        let status = Command::new("/usr/bin/windoesnot-update").args(&args).env("LC_ALL", "C").status()?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
     let mut args = prepare_pacman_args(args)?;
     if args.first().map(String::as_str) == Some("-Syu") {
         // Preview the same freshly synchronized databases that the upgrade uses.
@@ -81,6 +89,15 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
         .status()?;
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+fn validate_windoesnot_only(args: &[String]) -> Result<()> {
+    if args.first().map(String::as_str) == Some("--windoesnot-only")
+        && (args.len() == 1 || (args.len() == 2 && args[1] == "--noconfirm")) {
+        Ok(())
+    } else {
+        Err(anyhow!("invalid windoesnot-only arguments"))
+    }
 }
 
 fn prepare_pacman_args(mut args: Vec<String>) -> Result<Vec<String>> {
@@ -426,6 +443,16 @@ mod tests {
 
     fn prepare(args: &[&str]) -> Result<Vec<String>> {
         prepare_pacman_args(args.iter().map(|arg| arg.to_string()).collect())
+    }
+
+    #[test]
+    fn windoesnot_only_rejects_extra_arguments() {
+        for args in [vec!["--windoesnot-only"], vec!["--windoesnot-only", "--noconfirm"]] {
+            assert!(validate_windoesnot_only(&args.iter().map(|x| x.to_string()).collect::<Vec<_>>()).is_ok());
+        }
+        for args in [vec!["--windoesnot-only", "--nodeps"], vec!["--windoesnot-only", "--noconfirm", "--noconfirm"], vec!["--windoesnot-only", "foo"]] {
+            assert!(validate_windoesnot_only(&args.iter().map(|x| x.to_string()).collect::<Vec<_>>()).is_err());
+        }
     }
 
     #[test]

@@ -33,7 +33,9 @@ fn main() {
         println!("{}", serde_json::to_string(&status).unwrap_or_else(|_| "{}".into()));
         return;
     }
-    if args.iter().any(|arg| arg == "--upgrade") {
+    if args.iter().any(|arg| arg == "--windoesnot-updates") {
+        ui::START_PAGE.set("windoesnot-updates").ok();
+    } else if args.iter().any(|arg| arg == "--upgrade") {
         // From the desktop settings: review the full upgrade right away.
         ui::START_PAGE.set("upgrade").ok();
     } else if args.iter().any(|arg| arg == "--updates") {
@@ -46,5 +48,6 @@ fn main() {
     }
     let app = app::AuroraApp::new();
     let show_installed = args.len() == 2 && args[1] == "--installed";
-    app.run(open_desktop || show_installed);
+    let show_windoesnot = args.len() == 2 && args[1] == "--windoesnot-updates";
+    app.run(open_desktop || show_installed || show_windoesnot);
 }

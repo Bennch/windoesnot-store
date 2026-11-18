@@ -39,6 +39,10 @@ impl AuroraApp {
                 app.activate();
                 app.activate_action("show-installed", None);
                 0
+            } else if args.len() == 2 && args[1] == "--windoesnot-updates" {
+                app.activate();
+                app.activate_action("show-windoesnot-updates", None);
+                0
             } else if args.len() == 1 {
                 app.activate();
                 0
