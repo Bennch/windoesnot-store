@@ -250,7 +250,7 @@ fn helper_path() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn enabled_settings() -> Settings { Settings { aur_enabled: true, ..Settings::default() } }
+    fn enabled_settings() -> Settings { Settings { aur_enabled: true, aur_isolated: false, ..Settings::default() } }
 
     #[test]
     fn disabled_aur_rejects_stale_install_queue_but_allows_removal() {
