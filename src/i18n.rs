@@ -256,6 +256,8 @@ const DE: &[(&str, &str)] = &[
     ("Show Logs", "Protokoll anzeigen"),
     ("Hide Logs", "Protokoll ausblenden"),
     ("Working…", "Wird ausgeführt …"),
+    ("Waiting for the authentication. If no password window is open, cancel and try again.", "Es wird auf die Anmeldung gewartet. Ist kein Passwortfenster offen, brich ab und versuche es erneut."),
+    ("Waiting for the authentication", "Warte auf die Anmeldung"),
     ("Start actions immediately", "Aktionen sofort starten"),
     ("Install and remove directly instead of adding to the queue. System updates still require confirmation.", "Installieren und Entfernen sofort starten statt zur Warteschlange hinzuzufügen. Systemupdates müssen weiterhin bestätigt werden."),
     ("Cancel the running transaction", "Laufenden Vorgang abbrechen"),

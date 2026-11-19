@@ -1544,10 +1544,27 @@ fn run_plan(
         let notify_finished = notify_finished.clone();
         // --noconfirm answers every prompt itself; a dialog would only linger.
         let allow_prompt_dialog = terminal_mode == TerminalMode::Integrated && interactive;
+    // No output for a long time usually means the command waits for the password dialog: say so instead of
+    // leaving "Working…" on screen without a hint.
+    let got_output = Rc::new(std::cell::Cell::new(false));
+    {
+        let got_output = got_output.clone();
+        let current_handle = current_handle.clone();
+        let log_drawer = log_drawer.clone();
+        let toasts = toasts.clone();
+        glib::timeout_add_local_once(Duration::from_secs(25), move || {
+            if !got_output.get() && current_handle.borrow().is_some() {
+                log_drawer.append_line(t("Waiting for the authentication. If no password window is open, cancel and try again."), log_limit);
+                toasts.add_toast(adw::Toast::new(t("Waiting for the authentication")));
+            }
+        });
+    }
+    let got_output_loop = got_output.clone();
     glib::idle_add_local(move || match rx.try_recv() {
             Ok(event) => {
                 match event {
                     LogEvent::Line(line) => {
+                        got_output_loop.set(true);
                         log_drawer.observe_line(&line);
                         if allow_prompt_dialog && should_prompt(&line) && !*prompt_open.borrow() {
                             *prompt_open.borrow_mut() = true;
