@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use std::sync::mpsc::Sender;
@@ -201,9 +201,22 @@ impl CommandRunner {
                 Ok(status) => status.code().unwrap_or(1),
                 Err(_) => 1,
             };
-            // Drain both pipes before reporting completion, including final stderr.
-            if let Some(reader) = out_reader { let _ = reader.join(); }
-            if let Some(reader) = err_reader { let _ = reader.join(); }
+            // Drain both pipes before reporting completion, including final stderr, but never wait for them forever:
+            // a hook or helper that leaves a background process holding the pipe open would otherwise keep the
+            // transaction on "Working…" long after pacman has finished.
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+            let mut pending = 0;
+            for reader in [out_reader, err_reader].into_iter().flatten() {
+                let done_tx = done_tx.clone();
+                pending += 1;
+                thread::spawn(move || { let _ = reader.join(); let _ = done_tx.send(()); });
+            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(4);
+            while pending > 0 {
+                let left = deadline.saturating_duration_since(std::time::Instant::now());
+                if done_rx.recv_timeout(left).is_err() { break; }
+                pending -= 1;
+            }
             let _ = sender.send(LogEvent::Finished(status));
         });
 
