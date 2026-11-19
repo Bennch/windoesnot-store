@@ -133,6 +133,9 @@ fn repo_install_command(settings: &Settings, targets: Vec<String>) -> CommandSpe
     CommandSpec::new("pkexec", args)
 }
 
+/// Marks a removal that keeps the packages it depended on (the user declined the extra removals).
+pub const KEEP_DEPENDENCIES: &str = "keep-dependencies";
+
 pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Option<CommandSpec> {
     // Integrated logs run through pipes, so interactive package prompts can block forever.
     // Force non-interactive mode there; user setting still controls external-terminal mode.
@@ -149,7 +152,8 @@ pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Op
                 Some(repo_install_command(settings, vec![action.name.clone()]))
             }
             ActionKind::Remove => {
-                let mut args = vec![helper.clone(), "pacman".to_string(), "-Rns".to_string()];
+                let flags = if action.origin.as_deref() == Some(KEEP_DEPENDENCIES) { "-Rn" } else { "-Rns" };
+                let mut args = vec![helper.clone(), "pacman".to_string(), flags.to_string()];
                 args.extend(noconfirm.clone());
                 args.push(action.name.clone());
                 Some(CommandSpec::new("pkexec", args))
@@ -352,6 +356,16 @@ mod tests {
         let programs: Vec<_> = plan.commands.iter().map(|command| command.program.as_str()).collect();
         assert_eq!(programs, ["pkexec", "paru", "flatpak"]);
         assert_eq!(plan.commands[0].args[2], "-Rns");
+    }
+
+    #[test]
+    fn a_removal_that_keeps_dependencies_does_not_use_the_s_flag() {
+        let mut keep = action(PackageSource::Repo, ActionKind::Remove, "malcontent");
+        keep.origin = Some(KEEP_DEPENDENCIES.to_string());
+        let command = command_for_action(&keep, &enabled_settings()).unwrap();
+        assert_eq!(command.args[2], "-Rn");
+        let plain = command_for_action(&action(PackageSource::Repo, ActionKind::Remove, "vlc"), &enabled_settings()).unwrap();
+        assert_eq!(plain.args[2], "-Rns");
     }
 
     #[test]

@@ -175,11 +175,61 @@ impl QueueController {
     }
 
     pub fn add_remove(&self, name: String, source: PackageSource) {
+        if source != PackageSource::Repo {
+            self.finish_remove(name, source, None);
+            return;
+        }
+        // Look first at what pacman would take along (read-only), then ask if it is more than the one program.
+        let (tx, rx) = mpsc::channel();
+        let probe = name.clone();
+        std::thread::spawn(move || { let _ = tx.send(crate::core::removal::removal_preview(&probe)); });
+        let controller = self.clone();
+        glib::timeout_add_local(Duration::from_millis(50), move || match rx.try_recv() {
+            Ok(preview) => {
+                controller.confirm_removal(name.clone(), source, preview);
+                ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => ControlFlow::Continue,
+            Err(_) => {
+                controller.finish_remove(name.clone(), source, Some(crate::core::transactions::KEEP_DEPENDENCIES.to_string()));
+                ControlFlow::Break
+            }
+        });
+    }
+
+    fn confirm_removal(&self, name: String, source: PackageSource, preview: crate::core::removal::RemovalPreview) {
+        if preview.extras.is_empty() {
+            self.finish_remove(name, source, None);
+            return;
+        }
+        let mut body = tf("Removing {} would also remove: {}", &[&name, &preview.extras.join(", ")]);
+        if preview.flatpak_apps > 0 {
+            body.push_str("\n\n");
+            body.push_str(&tf("Your {} Flatpak apps would stop working.", &[&preview.flatpak_apps.to_string()]));
+        }
+        let dialog = adw::MessageDialog::new(Some(&self.parent), Some(t("Remove more than this program?")), Some(&body));
+        dialog.add_response("cancel", t("Cancel"));
+        dialog.add_response("only", t("Only remove this program"));
+        dialog.add_response("all", t("Remove all of them"));
+        dialog.set_response_appearance("only", adw::ResponseAppearance::Suggested);
+        dialog.set_response_appearance("all", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("only"));
+        dialog.set_close_response("cancel");
+        let controller = self.clone();
+        dialog.connect_response(None, move |_, response| match response {
+            "only" => controller.finish_remove(name.clone(), source, Some(crate::core::transactions::KEEP_DEPENDENCIES.to_string())),
+            "all" => controller.finish_remove(name.clone(), source, None),
+            _ => {}
+        });
+        dialog.present();
+    }
+
+    fn finish_remove(&self, name: String, source: PackageSource, origin: Option<String>) {
         let action = TransactionAction {
             name,
             source,
             kind: ActionKind::Remove,
-            origin: None,
+            origin,
         };
         let immediate = self.ctx.settings.lock().unwrap().immediate_actions;
         if immediate {
