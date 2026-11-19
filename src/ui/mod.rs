@@ -981,6 +981,29 @@ pub fn build_ui(app: &adw::Application) {
     });
     app.add_action(&only_action);
 
+    // "Update" in the desktop settings while Store is already running: the new process only forwards its arguments, so the
+    // running window has to switch to the updates page (and open the review for the full upgrade) itself.
+    let updates_action = gio::SimpleAction::new("show-updates", None);
+    let sidebar_for_updates = sidebar.clone();
+    let window_for_updates = window.clone();
+    updates_action.connect_activate(move |_, _| {
+        sidebar_for_updates.select_row(sidebar_for_updates.row_at_index(3).as_ref());
+        window_for_updates.present();
+    });
+    app.add_action(&updates_action);
+
+    let upgrade_action = gio::SimpleAction::new("show-upgrade", None);
+    let sidebar_for_upgrade = sidebar.clone();
+    let window_for_upgrade = window.clone();
+    let controller_for_upgrade = queue_controller.clone();
+    upgrade_action.connect_activate(move |_, _| {
+        sidebar_for_upgrade.select_row(sidebar_for_upgrade.row_at_index(3).as_ref());
+        window_for_upgrade.present();
+        controller_for_upgrade.add_upgrade_all();
+        controller_for_upgrade.show_review_dialog();
+    });
+    app.add_action(&upgrade_action);
+
     // A Start-menu request may arrive while Store is already running. The
     // application action is available after activation in either case.
     let open_action = gio::SimpleAction::new("open-desktop", Some(&String::static_variant_type()));

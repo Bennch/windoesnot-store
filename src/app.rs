@@ -43,11 +43,20 @@ impl AuroraApp {
                 app.activate();
                 app.activate_action("show-windoesnot-updates", None);
                 0
+            } else if args.len() == 2 && (args[1] == "--upgrade" || args[1] == "--updates") {
+                // A running Store receives the request through this forwarded call; a fresh start shows the page from
+                // START_PAGE when its window is built.
+                let running = app.active_window().is_some();
+                app.activate();
+                if running {
+                    app.activate_action(if args[1] == "--upgrade" { "show-upgrade" } else { "show-updates" }, None);
+                }
+                0
             } else if args.len() == 1 {
                 app.activate();
                 0
             } else {
-                eprintln!("Usage: windoesnot-store [--open-desktop /path/to/app.desktop | --installed]");
+                eprintln!("Usage: windoesnot-store [--open-desktop /path/to/app.desktop | --installed | --updates | --upgrade]");
                 2
             }
         });

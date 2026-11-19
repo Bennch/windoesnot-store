@@ -341,7 +341,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                     None => t("Install").to_string(),
                 });
-                if !lock_if_busy(&action_btn_clone, &queue_for_load, &name_for_busy_load) {
+                if !lock_if_busy(&action_btn_clone, &queue_for_load, &page_names(&name_for_busy_load, &options, &found)) {
                     action_btn_clone.set_sensitive(true);
                 }
                 loaded_for_load.set(true);
@@ -524,7 +524,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                         Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                         None => t("Install").to_string(),
                     });
-                    if !lock_if_busy(&action, &queue_for_refresh, &busy_name_for_refresh) {
+                    if !lock_if_busy(&action, &queue_for_refresh, &page_names(&busy_name_for_refresh, &available_sources.borrow(), &found)) {
                         action.set_sensitive(true);
                     }
                     let options = available_sources.borrow();
@@ -553,14 +553,14 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let pkg_origin = summary.origin.clone();
     {
         // Queue changes (added, removed, run started): lock while queued or running, free again afterwards.
-        let (button, queue, name, loaded, installations) =
-            (action_btn.clone(), handles.queue.clone(), summary.name.clone(), loaded.clone(), installations.clone());
+        let (button, queue, name, loaded, installations, sources) =
+            (action_btn.clone(), handles.queue.clone(), summary.name.clone(), loaded.clone(), installations.clone(), available_sources.clone());
         let weak = button.downgrade();
         let source = summary.source;
         handles.queue.connect_changed(move || {
             let Some(button) = weak.upgrade() else { return };
             if !loaded.get() { return; }
-            if lock_if_busy(&button, &queue, &name) { return; }
+            if lock_if_busy(&button, &queue, &page_names(&name, &sources.borrow(), &installations.borrow())) { return; }
             button.set_label(&match preferred(&installations.borrow(), source) {
                 Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                 None => t("Install").to_string(),
@@ -570,6 +570,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     }
     let click_queue = handles.queue.clone();
     let click_name = summary.name.clone();
+    let click_sources = available_sources.clone();
     action_btn.connect_clicked(move |button| {
         // Remove exactly the installation that was found, e.g. the Flatpak.
         match preferred(&installations.borrow(), pkg_source) {
@@ -579,7 +580,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 None => queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone()),
             },
         }
-        lock_if_busy(button, &click_queue, &click_name);
+        lock_if_busy(button, &click_queue, &page_names(&click_name, &click_sources.borrow(), &installations.borrow()));
     });
 
     let update_queue = handles.queue.clone();
@@ -842,11 +843,33 @@ fn update_open_button(
 
 /// Locks the install/remove button while the package is already queued or being worked on, so one
 /// click cannot put the same app into the queue twice. Returns true when it locked the button.
-fn lock_if_busy(button: &gtk::Button, queue: &crate::ui::QueueController, name: &str) -> bool {
-    match queue.package_state(name) {
+/// Every name the queue may know this page's app under: the listed package, each source that offers it (Flatpak id,
+/// repository or AUR name) and each installation (what Remove is queued as). A page that only compared the listed name
+/// stayed clickable while the Flatpak or AUR variant of the same app was being installed.
+fn page_names(listed: &str, options: &[SourceOption], found: &[Installation]) -> Vec<String> {
+    let mut names = vec![listed.to_string()];
+    for name in options.iter().map(|o| &o.name).chain(found.iter().map(|i| &i.name)) {
+        if !names.contains(name) { names.push(name.clone()); }
+    }
+    names
+}
+
+fn lock_if_busy(button: &gtk::Button, queue: &crate::ui::QueueController, names: &[String]) -> bool {
+    match names.iter().map(|n| queue.package_state(n)).max().unwrap_or(0) {
         0 => false,
         state => {
-            button.set_label(if state == 2 { t("Working…") } else { t("In queue") });
+            if state == 2 {
+                // Running right now: spinner and label inside the button, so it is clear that something is happening.
+                let spinner = gtk::Spinner::new();
+                spinner.start();
+                let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                row.set_halign(gtk::Align::Center);
+                row.append(&spinner);
+                row.append(&gtk::Label::new(Some(t("Working…"))));
+                button.set_child(Some(&row));
+            } else {
+                button.set_label(t("In queue"));
+            }
             button.set_sensitive(false);
             true
         }

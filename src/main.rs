@@ -49,5 +49,6 @@ fn main() {
     let app = app::AuroraApp::new();
     let show_installed = args.len() == 2 && args[1] == "--installed";
     let show_windoesnot = args.len() == 2 && args[1] == "--windoesnot-updates";
-    app.run(open_desktop || show_installed || show_windoesnot);
+    let show_updates = args.len() == 2 && (args[1] == "--updates" || args[1] == "--upgrade");
+    app.run(open_desktop || show_installed || show_windoesnot || show_updates);
 }
