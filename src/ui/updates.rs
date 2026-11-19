@@ -716,6 +716,8 @@ pub(crate) fn collect_pacman_updates() -> Vec<(TransactionAction, String)> {
     output
         .lines()
         .filter(|l| !l.trim().is_empty())
+        // CPU-optimised rebuilds of the same version are no news; a full upgrade still brings them.
+        .filter(|l| !crate::core::rebuild::is_cpu_rebuild_line(l))
         .map(|line| {
             let name = line.split_whitespace().next().unwrap_or("").to_string();
             (

@@ -11,6 +11,7 @@ pub mod models;
 pub mod news;
 pub mod pending;
 pub mod providers;
+pub mod rebuild;
 pub mod syncdb;
 pub mod runner;
 pub mod sources;

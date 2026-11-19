@@ -79,6 +79,10 @@ pub struct QueueController {
     parent: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     finished: FinishedListeners,
+    /// Called whenever the queue changes or a run starts, so install buttons can lock themselves.
+    changed: FinishedListeners,
+    /// Packages of the transaction that is running right now.
+    active: Rc<RefCell<Vec<String>>>,
 }
 
 /// Called on the main thread whenever a transaction run ends, successful or
@@ -93,14 +97,43 @@ impl QueueController {
         parent: adw::ApplicationWindow,
         toasts: adw::ToastOverlay,
     ) -> Self {
-        Self {
-            ctx,
-            button,
-            log_drawer,
-            parent,
-            toasts,
-            finished: Rc::new(RefCell::new(Vec::new())),
+        let finished: FinishedListeners = Rc::new(RefCell::new(Vec::new()));
+        let changed: FinishedListeners = Rc::new(RefCell::new(Vec::new()));
+        let active: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        {
+            // Registered first, so pages see the run as over when their own listener runs.
+            let active = active.clone();
+            finished.borrow_mut().push(Rc::new(move || active.borrow_mut().clear()));
         }
+        Self { ctx, button, log_drawer, parent, toasts, finished, changed, active }
+    }
+
+    /// Lock an install/remove button while the package is queued or being worked on (no double entries).
+    pub fn connect_changed(&self, listener: impl Fn() + 'static) {
+        self.changed.borrow_mut().push(Rc::new(listener));
+    }
+
+    fn notify_changed(&self) {
+        let listeners: Vec<_> = self.changed.borrow().clone();
+        for listener in listeners {
+            listener();
+        }
+    }
+
+    /// 0 = free, 1 = waiting in the queue, 2 = running right now.
+    pub fn package_state(&self, name: &str) -> u8 {
+        if *self.ctx.transaction_in_progress.lock().unwrap() && self.active.borrow().iter().any(|n| n == name) {
+            return 2;
+        }
+        if self.ctx.queue.lock().unwrap().actions.iter().any(|a| a.name == name) {
+            return 1;
+        }
+        0
+    }
+
+    fn mark_active(&self, queue: &TransactionQueue) {
+        *self.active.borrow_mut() = queue.actions.iter().map(|a| a.name.clone()).collect();
+        self.notify_changed();
     }
 
     pub fn connect_finished(&self, listener: impl Fn() + 'static) {
@@ -110,6 +143,7 @@ impl QueueController {
     fn update_label(&self) {
         let len = self.ctx.queue.lock().unwrap().len();
         self.button.set_label(&tf("Queue ({})", &[&len]));
+        self.notify_changed();
     }
 
     fn toast(&self, message: &str) {
@@ -134,10 +168,10 @@ impl QueueController {
             return;
         }
         let mut queue = self.ctx.queue.lock().unwrap();
-        queue.push(action);
+        let added = queue.push(action);
         drop(queue);
         self.update_label();
-        self.toast(t("Added to queue"));
+        self.toast(if added { t("Added to queue") } else { t("Already in the queue") });
     }
 
     pub fn add_remove(&self, name: String, source: PackageSource) {
@@ -153,10 +187,10 @@ impl QueueController {
             return;
         }
         let mut queue = self.ctx.queue.lock().unwrap();
-        queue.push(action);
+        let added = queue.push(action);
         drop(queue);
         self.update_label();
-        self.toast(t("Added to queue"));
+        self.toast(if added { t("Added to queue") } else { t("Already in the queue") });
     }
 
     pub fn add_upgrade_repo(&self) {
@@ -247,6 +281,7 @@ impl QueueController {
             Err(err) => { self.toast(&err.to_string()); return; }
         };
         start_checked_plan(plan, self.ctx.clone(), self.log_drawer.clone(), self.parent.clone(), self.toasts.clone(), self.finished.clone(), None);
+        self.mark_active(&queue);
     }
 
     fn show_review_dialog_for(&self, immediate_queue: Option<TransactionQueue>) {
@@ -472,6 +507,7 @@ impl QueueController {
         let toasts = self.toasts.clone();
         let finished = self.finished.clone();
         let local_queue = immediate_queue.clone();
+        let controller = self.clone();
 
         dialog.connect_response(None, move |d: &adw::MessageDialog, resp| {
             if resp == "execute" {
@@ -489,6 +525,7 @@ impl QueueController {
                 };
                 start_checked_plan(plan, ctx.clone(), log_drawer.clone(), parent.clone(), toasts.clone(), finished.clone(),
                     local_queue.is_none().then(|| button.clone()));
+                controller.mark_active(&queue);
             }
             d.close();
         });

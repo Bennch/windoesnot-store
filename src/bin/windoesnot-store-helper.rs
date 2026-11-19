@@ -5,6 +5,9 @@ use std::process::Command;
 
 use anyhow::{anyhow, Result};
 
+#[path = "../core/rebuild.rs"]
+mod rebuild;
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("windoesnot-store-helper error: {err}");
@@ -62,6 +65,14 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
         // Preview the same freshly synchronized databases that the upgrade uses.
         let refresh = Command::new("pacman").args(["-Sy"]).env("LC_ALL", "C").status()?;
         if !refresh.success() { std::process::exit(refresh.code().unwrap_or(1)); }
+        // Installing apps on a fresh system: when nothing but CPU-optimised rebuilds (same version) is
+        // waiting, install just the requested packages instead of re-downloading hundreds of rebuilds.
+        if args.iter().skip(1).any(|arg| !arg.starts_with('-')) && only_cpu_rebuilds_pending() {
+            println!("Only CPU-optimised rebuilds of installed versions are waiting; installing just the requested packages.");
+            args[0] = "-S".to_string();
+            let status = Command::new("pacman").args(&args).env("LC_ALL", "C").status()?;
+            std::process::exit(status.code().unwrap_or(1));
+        }
         let output = Command::new("/usr/bin/windoesnot-update-plan").env("LC_ALL", "C").output();
         if let Ok(output) = output {
             if output.status.success() {
@@ -89,6 +100,17 @@ fn run_pacman(mut args: Vec<String>) -> Result<()> {
         .status()?;
 
     std::process::exit(status.code().unwrap_or(1));
+}
+
+/// After a database refresh: every waiting update is a same-version CPU rebuild (and there is at least one
+/// check result at all, so a failed query never counts as "nothing to update").
+fn only_cpu_rebuilds_pending() -> bool {
+    let Ok(output) = Command::new("pacman").args(["-Qu"]).env("LC_ALL", "C").output() else { return false };
+    // pacman -Qu exits 1 with no output when nothing is waiting; any other failure counts as unknown.
+    if !output.status.success() && !(output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty()) {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout).lines().filter(|l| !l.trim().is_empty()).all(rebuild::is_cpu_rebuild_line)
 }
 
 fn validate_windoesnot_only(args: &[String]) -> Result<()> {

@@ -233,7 +233,10 @@ fn pending_updates() -> Vec<PendingUpdate> {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
-    parse_pending_with_source(&output, "repo")
+    // CPU-optimised rebuilds of the same version are no updates for the user.
+    let mut updates = parse_pending_with_source(&output, "repo");
+    updates.retain(|update| !crate::core::rebuild::is_cpu_rebuild(&update.old, &update.new));
+    updates
 }
 
 pub fn pending_aur_updates(helper: &str) -> anyhow::Result<Vec<PendingUpdate>> {

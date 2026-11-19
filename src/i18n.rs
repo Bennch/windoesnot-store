@@ -240,6 +240,8 @@ const DE: &[(&str, &str)] = &[
     ("Programs from the AUR", "Programme aus dem AUR"),
     ("Flatpak apps", "Flatpak-Apps"),
     ("Added to queue", "Zur Warteschlange hinzugefügt"),
+    ("Already in the queue", "Schon in der Warteschlange"),
+    ("In queue", "In der Warteschlange"),
     ("Queue is empty", "Die Warteschlange ist leer"),
     ("Remove from queue", "Aus der Warteschlange entfernen"),
     ("Add install/remove actions first.", "Füge zuerst Installationen oder Entfernungen hinzu."),

@@ -6,11 +6,68 @@
 //! is matched against Flathub app names.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const FLATHUB: &str = "/var/lib/flatpak/appstream/flathub/x86_64/active";
 const SWCATALOG_ICONS: &str = "/usr/share/swcatalog/icons";
 const SIZES: [&str; 2] = ["128x128", "64x64"];
+
+/// A lookup table that is rebuilt when its source files change. On a fresh installation Flatpak downloads the
+/// Flathub catalogue shortly after the first start; a table built before that must not stay empty for the whole
+/// session (apps showed up as "Client" or by package name). The source is looked at most every few seconds.
+struct Reloading<T: 'static> {
+    state: Mutex<Option<(Instant, String, &'static T)>>,
+}
+
+impl<T> Reloading<T> {
+    const fn new() -> Self {
+        Self { state: Mutex::new(None) }
+    }
+
+    fn get(&self, signature: fn() -> String, build: impl FnOnce() -> T) -> &'static T {
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((checked, seen, value)) = state.as_mut() {
+            if checked.elapsed() < Duration::from_secs(3) {
+                return value;
+            }
+            let now = signature();
+            *checked = Instant::now();
+            if now == *seen {
+                return value;
+            }
+        }
+        let seen = signature();
+        // Older tables are leaked on purpose: callers hold plain references into them.
+        let value: &'static T = Box::leak(Box::new(build()));
+        *state = Some((Instant::now(), seen, value));
+        value
+    }
+}
+
+fn file_signature(path: &Path) -> String {
+    match std::fs::metadata(path) {
+        Ok(meta) => format!("{}:{:?}", meta.len(), meta.modified().ok()),
+        Err(_) => "missing".to_string(),
+    }
+}
+
+fn flathub_signature() -> String {
+    let active = std::fs::canonicalize(FLATHUB).map(|p| p.display().to_string()).unwrap_or_default();
+    format!("{active}|{}", file_signature(&Path::new(FLATHUB).join("appstream.xml")))
+}
+
+fn arch_signature() -> String {
+    ["core", "extra", "multilib"]
+        .iter()
+        .map(|name| file_signature(&Path::new("/usr/share/swcatalog/xml").join(format!("{name}.xml.gz"))))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn arch_icons_signature() -> String {
+    file_signature(Path::new(SWCATALOG_ICONS))
+}
 
 pub fn normalize(name: &str) -> String {
     name.chars()
@@ -153,8 +210,8 @@ fn readable_id(id: &str) -> String {
 }
 
 fn flathub_names() -> &'static HashMap<String, String> {
-    static NAMES: OnceLock<HashMap<String, String>> = OnceLock::new();
-    NAMES.get_or_init(|| {
+    static CACHE: Reloading<HashMap<String, String>> = Reloading::new();
+    CACHE.get(flathub_signature, || {
         let mut names = HashMap::new();
         let Ok(xml) = std::fs::read_to_string(Path::new(FLATHUB).join("appstream.xml")) else {
             return names;
@@ -170,8 +227,8 @@ fn flathub_names() -> &'static HashMap<String, String> {
 
 /// Package name -> name from the Arch AppStream catalogue (`<pkgname>` + untranslated `<name>`).
 fn arch_names() -> &'static HashMap<String, (String, String)> {
-    static NAMES: OnceLock<HashMap<String, (String, String)>> = OnceLock::new();
-    NAMES.get_or_init(|| {
+    static CACHE: Reloading<HashMap<String, (String, String)>> = Reloading::new();
+    CACHE.get(arch_signature, || {
         use std::io::Read;
         let mut names = HashMap::new();
         for file in ["core", "extra", "multilib"] {
@@ -214,8 +271,8 @@ fn flathub_icon_by_id(id: &str) -> Option<PathBuf> {
 }
 
 fn arch_index() -> &'static HashMap<String, PathBuf> {
-    static INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
-    INDEX.get_or_init(|| {
+    static CACHE: Reloading<HashMap<String, PathBuf>> = Reloading::new();
+    CACHE.get(arch_icons_signature, || {
         let mut index = HashMap::new();
         let Ok(origins) = std::fs::read_dir(SWCATALOG_ICONS) else {
             return index;
@@ -239,8 +296,8 @@ fn arch_index() -> &'static HashMap<String, PathBuf> {
 }
 
 fn flathub_index() -> &'static HashMap<String, PathBuf> {
-    static INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
-    INDEX.get_or_init(|| {
+    static CACHE: Reloading<HashMap<String, PathBuf>> = Reloading::new();
+    CACHE.get(flathub_signature, || {
         let mut index = HashMap::new();
         let Ok(xml) = std::fs::read_to_string(Path::new(FLATHUB).join("appstream.xml")) else {
             return index;

@@ -46,7 +46,9 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     icon.set_valign(gtk::Align::Start);
 
     let text_col = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    let name = gtk::Label::new(Some(&crate::core::icons::display_name(&summary.name, flathub_id, &summary.name)));
+    // The catalogue name is the same whichever source the page was opened from (repo package or Flatpak).
+    let shown_id = flathub_id.or(flatpak_id.as_deref());
+    let name = gtk::Label::new(Some(&crate::core::icons::display_name(&summary.name, shown_id, &summary.name)));
     name.add_css_class("title-1");
     name.set_xalign(0.0);
 
@@ -271,6 +273,11 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let description_heading_clone = description_heading.clone();
     let carousel_clone = carousel.clone();
     let action_btn_clone = action_btn.clone();
+    let queue_for_load = handles.queue.clone();
+    let name_for_busy_load = summary.name.clone();
+    // True once the installed state is known; before that the button stays locked.
+    let loaded = Rc::new(std::cell::Cell::new(false));
+    let loaded_for_load = loaded.clone();
     let update_loading_for_details = update_loading.clone();
     let update_spinner_for_details = update_spinner.clone();
     let update_btn_for_status = update_btn.clone();
@@ -334,7 +341,10 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                     Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                     None => t("Install").to_string(),
                 });
-                action_btn_clone.set_sensitive(true);
+                if !lock_if_busy(&action_btn_clone, &queue_for_load, &name_for_busy_load) {
+                    action_btn_clone.set_sensitive(true);
+                }
+                loaded_for_load.set(true);
                 update_open_button(&open_app_for_load, &launcher_for_load, preferred(&found, summary_source));
                 if !found.is_empty() {
                     update_loading_for_details.set_visible(true);
@@ -465,6 +475,8 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let name_for_refresh = summary.name.clone();
     let installations_for_refresh = installations.clone();
     let action_for_refresh = action_btn.clone();
+    let queue_for_refresh = handles.queue.clone();
+    let busy_name_for_refresh = summary.name.clone();
     let open_app_for_refresh = open_app_btn.clone();
     let launcher_for_refresh = launcher.clone();
     let installed_for_refresh = installed.clone();
@@ -489,6 +501,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
             let _ = tx.send((found, pending));
         });
         let installations = installations_for_refresh.clone();
+        let (queue_for_refresh, busy_name_for_refresh) = (queue_for_refresh.clone(), busy_name_for_refresh.clone());
         let action = action_for_refresh.clone();
         let (open_app, launcher_cell) = (open_app_for_refresh.clone(), launcher_for_refresh.clone());
         let installed = installed_for_refresh.clone();
@@ -511,6 +524,9 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                         Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
                         None => t("Install").to_string(),
                     });
+                    if !lock_if_busy(&action, &queue_for_refresh, &busy_name_for_refresh) {
+                        action.set_sensitive(true);
+                    }
                     let options = available_sources.borrow();
                     fill_sources(&sources_list, &options, &found, summary_source, &chosen, &system_note, pending);
                     let choose_source = found.is_empty() && !options.is_empty();
@@ -535,7 +551,26 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let pkg_name = summary.name.clone();
     let pkg_source = summary.source;
     let pkg_origin = summary.origin.clone();
-    action_btn.connect_clicked(move |_| {
+    {
+        // Queue changes (added, removed, run started): lock while queued or running, free again afterwards.
+        let (button, queue, name, loaded, installations) =
+            (action_btn.clone(), handles.queue.clone(), summary.name.clone(), loaded.clone(), installations.clone());
+        let weak = button.downgrade();
+        let source = summary.source;
+        handles.queue.connect_changed(move || {
+            let Some(button) = weak.upgrade() else { return };
+            if !loaded.get() { return; }
+            if lock_if_busy(&button, &queue, &name) { return; }
+            button.set_label(&match preferred(&installations.borrow(), source) {
+                Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
+                None => t("Install").to_string(),
+            });
+            button.set_sensitive(true);
+        });
+    }
+    let click_queue = handles.queue.clone();
+    let click_name = summary.name.clone();
+    action_btn.connect_clicked(move |button| {
         // Remove exactly the installation that was found, e.g. the Flatpak.
         match preferred(&installations.borrow(), pkg_source) {
             Some(installation) => queue.add_remove(installation.name.clone(), installation.source),
@@ -544,6 +579,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 None => queue.add_install(pkg_name.clone(), pkg_source, pkg_origin.clone()),
             },
         }
+        lock_if_busy(button, &click_queue, &click_name);
     });
 
     let update_queue = handles.queue.clone();
@@ -801,4 +837,18 @@ fn update_open_button(
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
         Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
     });
+}
+
+
+/// Locks the install/remove button while the package is already queued or being worked on, so one
+/// click cannot put the same app into the queue twice. Returns true when it locked the button.
+fn lock_if_busy(button: &gtk::Button, queue: &crate::ui::QueueController, name: &str) -> bool {
+    match queue.package_state(name) {
+        0 => false,
+        state => {
+            button.set_label(if state == 2 { t("Working…") } else { t("In queue") });
+            button.set_sensitive(false);
+            true
+        }
+    }
 }
