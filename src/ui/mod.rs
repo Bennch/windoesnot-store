@@ -999,6 +999,15 @@ pub fn build_ui(app: &adw::Application) {
     upgrade_action.connect_activate(move |_, _| {
         sidebar_for_upgrade.select_row(sidebar_for_upgrade.row_at_index(3).as_ref());
         window_for_upgrade.present();
+        // A second request (another click on the Settings' Update button) must not stack a second review dialog.
+        for toplevel in gtk::Window::list_toplevels() {
+            if let Ok(dialog) = toplevel.downcast::<adw::MessageDialog>() {
+                if dialog.is_visible() && dialog.transient_for().as_ref() == Some(window_for_upgrade.upcast_ref::<gtk::Window>()) {
+                    dialog.present();
+                    return;
+                }
+            }
+        }
         controller_for_upgrade.add_upgrade_all();
         controller_for_upgrade.show_review_dialog();
     });
