@@ -175,7 +175,7 @@ impl QueueController {
     }
 
     pub fn add_remove(&self, name: String, source: PackageSource) {
-        if source != PackageSource::Repo {
+        if !matches!(source, PackageSource::Repo | PackageSource::Aur) {
             self.finish_remove(name, source, None);
             return;
         }

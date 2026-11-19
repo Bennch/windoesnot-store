@@ -172,7 +172,10 @@ pub fn command_for_action(action: &TransactionAction, settings: &Settings) -> Op
                 Some(spec)
             }
             ActionKind::Install => Some(aur_command(settings.aur_helper, "-Syu", Some(&action.name), &noconfirm, &helper)),
-            ActionKind::Remove => Some(aur_command(settings.aur_helper, "-Rns", Some(&action.name), &noconfirm, &helper)),
+            ActionKind::Remove => {
+                let flags = if action.origin.as_deref() == Some(KEEP_DEPENDENCIES) { "-Rn" } else { "-Rns" };
+                Some(aur_command(settings.aur_helper, flags, Some(&action.name), &noconfirm, &helper))
+            }
             ActionKind::Upgrade => Some(aur_command(settings.aur_helper, "-Syu", None, &noconfirm, &helper)),
         },
         PackageSource::Flatpak => match action.kind {
@@ -216,7 +219,7 @@ fn aur_command(helper: AurHelperKind, op: &str, pkg: Option<&str>, noconfirm: &[
     if let Some(pkg) = pkg {
         // Removal works on installed names; installs must not resolve to a repo
         // package that merely provides the same name (pfetch -> pfetch-rs).
-        args.push(if op == "-Rns" { pkg.to_string() } else { format!("aur/{pkg}") });
+        args.push(if op.starts_with("-R") { pkg.to_string() } else { format!("aur/{pkg}") });
     }
 
     with_privileged_helper(CommandSpec::new(helper.as_str(), args), helper_path)
@@ -366,6 +369,15 @@ mod tests {
         assert_eq!(command.args[2], "-Rn");
         let plain = command_for_action(&action(PackageSource::Repo, ActionKind::Remove, "vlc"), &enabled_settings()).unwrap();
         assert_eq!(plain.args[2], "-Rns");
+    }
+
+    #[test]
+    fn an_aur_removal_that_keeps_dependencies_uses_the_installed_name_too() {
+        let mut keep = action(PackageSource::Aur, ActionKind::Remove, "pfetch");
+        keep.origin = Some(KEEP_DEPENDENCIES.to_string());
+        let command = command_for_action(&keep, &enabled_settings()).unwrap();
+        assert_eq!(&command.args[..2], ["-Rn", "--noconfirm"]);
+        assert!(command.args.iter().any(|arg| arg == "pfetch") && !command.args.iter().any(|arg| arg == "aur/pfetch"), "{:?}", command.args);
     }
 
     #[test]
