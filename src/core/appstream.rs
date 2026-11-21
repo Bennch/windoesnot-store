@@ -194,7 +194,7 @@ impl AppStreamClient {
             return None;
         }
         let url = format!("https://flathub.org/api/v2/appstream/{id}");
-        let response = ureq::get(&url).timeout(std::time::Duration::from_secs(8)).call().ok()?;
+        let response = ureq::get(&url).timeout(std::time::Duration::from_secs(3)).call().ok()?;
         let json: Value = serde_json::from_str(&response.into_string().ok()?).ok()?;
         let text = |key: &str| json.get(key).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(str::to_owned);
         let screenshots = json
@@ -267,7 +267,7 @@ impl AppStreamClient {
         if path.exists() {
             return Ok(());
         }
-        let response = ureq::get(url).call()?;
+        let response = ureq::get(url).timeout(std::time::Duration::from_secs(3)).call()?;
         let mut reader = response.into_reader();
         let mut file = fs::File::create(path)?;
         let _ = std::io::copy(&mut reader, &mut file)?;

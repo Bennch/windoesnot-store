@@ -305,7 +305,15 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
     let available_sources_for_load = available_sources.clone();
     let system_note_clone = system_note.clone();
     let (tx, rx) = mpsc::channel();
+    let (status_tx, status_rx) = mpsc::channel();
     let (update_tx, update_rx) = mpsc::channel();
+    let status_ctx = ctx_clone.clone();
+    let status_name = summary_clone.name.clone();
+    let status_flatpak = flatpak_id.clone();
+    std::thread::spawn(move || {
+        let found = status_ctx.installed_apps().find(&status_name, status_flatpak.as_deref());
+        let _ = status_tx.send(found);
+    });
     std::thread::spawn(move || {
         let found = ctx_clone.installed_apps().find(&summary_clone.name, flatpak_id.as_deref());
         let options = source_options(&ctx_clone, &summary_clone, flatpak_id.as_deref());
@@ -322,6 +330,33 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         let _ = update_tx.send(update);
     });
 
+    // Local installation state alone determines the action. Network metadata and
+    // source discovery must never hold this button disabled.
+    glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
+        match status_rx.try_recv() {
+            Ok(found) => {
+                installed_clone.set_subtitle(&markup_escape(&installed_value(&found)));
+                action_btn_clone.set_label(&match preferred(&found, summary_source) {
+                    Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
+                    None => t("Install").to_string(),
+                });
+                if !lock_if_busy(&action_btn_clone, &queue_for_load, &page_names(&name_for_busy_load, &[], &found)) {
+                    action_btn_clone.set_sensitive(true);
+                }
+                loaded_for_load.set(true);
+                update_open_button(&open_app_for_load, &launcher_for_load, preferred(&found, summary_source));
+                if !found.is_empty() {
+                    update_loading_for_details.set_visible(true);
+                    update_spinner_for_details.start();
+                }
+                *installations_clone.borrow_mut() = found;
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+
     glib::timeout_add_local(std::time::Duration::from_millis(40), move || {
         match rx.try_recv() {
             Ok((details, found, options, info, pending)) => {
@@ -336,21 +371,6 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                 sources_list_clone.set_visible(pick_source);
                 summary_label_clone.set_text(&details.summary);
                 version_clone.set_subtitle(&markup_escape(if details.version.is_empty() { "–" } else { &details.version }));
-                installed_clone.set_subtitle(&markup_escape(&installed_value(&found)));
-                action_btn_clone.set_label(&match preferred(&found, summary_source) {
-                    Some(installation) => tf("Remove ({})", &[&installation.source.label()]),
-                    None => t("Install").to_string(),
-                });
-                if !lock_if_busy(&action_btn_clone, &queue_for_load, &page_names(&name_for_busy_load, &options, &found)) {
-                    action_btn_clone.set_sensitive(true);
-                }
-                loaded_for_load.set(true);
-                update_open_button(&open_app_for_load, &launcher_for_load, preferred(&found, summary_source));
-                if !found.is_empty() {
-                    update_loading_for_details.set_visible(true);
-                    update_spinner_for_details.start();
-                }
-                *installations_clone.borrow_mut() = found;
                 if let Some(size) = &details.size {
                     size_clone.set_subtitle(&markup_escape(size));
                 }
@@ -497,8 +517,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         let flatpak_id = flatpak_id_for_refresh.clone();
         std::thread::spawn(move || {
             let found = ctx.installed_apps().find(&name, flatpak_id.as_deref());
-            let pending = if found.is_empty() { updates::collect_pacman_updates().len() } else { 0 };
-            let _ = tx.send((found, pending));
+            let _ = tx.send(found);
         });
         let installations = installations_for_refresh.clone();
         let (queue_for_refresh, busy_name_for_refresh) = (queue_for_refresh.clone(), busy_name_for_refresh.clone());
@@ -516,7 +535,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
         let pending_update = pending_update_for_refresh.clone();
         let page = page_for_refresh.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || match rx.try_recv() {
-            Ok((found, pending)) => {
+            Ok(found) => {
                 if page.upgrade().is_some() {
                     installed.set_subtitle(&markup_escape(&installed_value(&found)));
                     update_open_button(&open_app, &launcher_cell, preferred(&found, summary_source));
@@ -528,7 +547,7 @@ pub fn show_details(ctx: &AppContext, handles: &UiHandles, summary: PackageSumma
                         action.set_sensitive(true);
                     }
                     let options = available_sources.borrow();
-                    fill_sources(&sources_list, &options, &found, summary_source, &chosen, &system_note, pending);
+                    fill_sources(&sources_list, &options, &found, summary_source, &chosen, &system_note, 0);
                     let choose_source = found.is_empty() && !options.is_empty();
                     sources_heading.set_visible(choose_source);
                     sources_list.set_visible(choose_source);
