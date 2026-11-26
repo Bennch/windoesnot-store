@@ -216,6 +216,7 @@ const DE: &[(&str, &str)] = &[
     ("No notable findings", "Keine Auffälligkeiten gefunden"),
     ("Changes since your version", "Änderungen seit deiner Version"),
     ("Build instructions (PKGBUILD)", "Bauanleitung (PKGBUILD)"),
+    ("Install script {} (runs as administrator)", "Installationsskript {} (läuft mit Administratorrechten)"),
     ("Downloads a script and runs it right away", "Lädt ein Skript herunter und führt es sofort aus"),
     ("Decodes hidden (Base64) content", "Entschlüsselt versteckte (Base64-)Inhalte"),
     ("Runs commands that are assembled while building (eval)", "Führt Befehle aus, die erst beim Bauen zusammengesetzt werden (eval)"),

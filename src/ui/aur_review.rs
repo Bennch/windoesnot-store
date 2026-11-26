@@ -141,4 +141,22 @@ fn fill(body: &gtk::Box, review: &Review) {
     scroller.set_min_content_height(240);
     scroller.set_child(Some(&view));
     body.append(&scroller);
+
+    // The install script runs as administrator when the package is installed, so it is shown in full.
+    if let Some((file, script)) = &review.install_script {
+        let heading = gtk::Label::new(Some(&tf("Install script {} (runs as administrator)", &[file])));
+        heading.add_css_class("heading");
+        heading.set_xalign(0.0);
+        body.append(&heading);
+        let view = gtk::TextView::with_buffer(&gtk::TextBuffer::new(None));
+        view.buffer().set_text(script);
+        view.set_editable(false);
+        view.set_monospace(true);
+        view.set_cursor_visible(false);
+        let scroller = gtk::ScrolledWindow::new();
+        scroller.set_vexpand(true);
+        scroller.set_min_content_height(160);
+        scroller.set_child(Some(&view));
+        body.append(&scroller);
+    }
 }
